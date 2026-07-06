@@ -16,6 +16,7 @@ class JobOut(BaseModel):
     title: str
     company: str
     location: str | None
+    city: str | None
     country: str | None
     is_remote: bool
     is_european: bool

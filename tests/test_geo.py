@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.ingest.geo import is_european, resolve_country
+from app.ingest.geo import is_european, location_identity, resolve_city, resolve_country
 
 
 @pytest.mark.parametrize(
@@ -44,3 +44,36 @@ def test_resolve_country_non_european(location):
 
 def test_is_european_true():
     assert is_european("Remote, Spain") is True
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("Munich", "Munich"),
+        ("Munich, Germany", "Munich"),
+        ("München", "Munich"),
+        ("München, Bavaria, Germany", "Munich"),
+        ("Augsburg, Germany; Munich, Germany", "Munich"),  # first known city wins
+        ("Paris", "Paris"),
+        ("Remote, Germany", None),  # country only, no known city
+        ("Aurora, IL, United States", None),
+        (None, None),
+    ],
+)
+def test_resolve_city(location, expected):
+    assert resolve_city(location) == expected
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        ("Munich", "Munich, Germany"),
+        ("Munich, Germany", "Munich, Germany"),
+        ("München", "Munich, Germany"),
+        ("Remote, Germany", "Germany"),  # country only
+        ("Worldwide", ""),  # unknown -> empty (caller falls back to raw)
+        ("Austin, TX", ""),
+    ],
+)
+def test_location_identity(location, expected):
+    assert location_identity(location) == expected

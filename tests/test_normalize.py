@@ -48,7 +48,17 @@ def test_normalize_location():
 def test_dedup_key_is_stable_across_formatting():
     a = dedup_key("GitLab Inc.", "Senior  Backend Engineer", "Remote, Germany")
     b = dedup_key("gitlab", "senior backend engineer", "remote, germany")
-    assert a == b == "gitlab|senior backend engineer|remote, germany"
+    # Location resolves to the canonical country identity (Germany).
+    assert a == b == "gitlab|senior backend engineer|germany"
+
+
+def test_dedup_key_collapses_city_variants():
+    keys = {
+        dedup_key("Personio", "Backend Engineer", loc)
+        for loc in ["Munich", "Munich, Germany", "München", "Munich, Bavaria, Germany"]
+    }
+    # Every Munich spelling/format collapses to one dedup key.
+    assert keys == {"personio|backend engineer|munich, germany"}
 
 
 def test_dedup_key_differs_on_title():

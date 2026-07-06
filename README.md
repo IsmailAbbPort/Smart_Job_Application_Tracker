@@ -20,10 +20,12 @@ Postgres, deduped and served by a `/jobs` API. No AI yet (Phases 2-7).
   per-source TTL throttle so rate-limited feeds (Remotive) are polled politely.
 - **Dedup:** `(source, source_id)` for re-poll idempotency + a normalized
   `(company, title, location)` key for cross-source dedup.
-- **Read:** `GET /jobs` with source / remote / **europe** / country / company / text
-  filters + pagination. Every job gets a best-effort `country` + `is_european` flag
-  derived from its location, so `?is_remote=true&europe=true` gives the actual
-  EU-remote search scope (US/Worldwide-remote roles are stored but filtered out).
+- **Read:** `GET /jobs` with source / remote / **europe** / country / city / company /
+  text filters + pagination. Every job gets a best-effort canonical `city` +
+  `country` + `is_european` derived from its raw location (so "Munich", "München"
+  and "Munich, Germany" all collapse to one place, which also tightens cross-source
+  dedup). `?is_remote=true&europe=true` gives the actual EU-remote search scope
+  (US/Worldwide-remote roles are stored but filtered out).
 - **Adjustable targets:** monitored companies live in a `target_company` table
   (seeded from YAML), editable at runtime via `/targets` (list/add/toggle/delete).
 - Verified end to end: `docker compose up` -> Alembic migrates + seeds -> ingested

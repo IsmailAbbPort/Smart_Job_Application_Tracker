@@ -53,7 +53,8 @@ class Job(Base):
     company: Mapped[str] = mapped_column(Text, nullable=False)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_remote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Derived geo (best-effort from location); country is None when non-European/unknown.
+    # Derived geo (best-effort from location); None when unknown/non-European.
+    city: Mapped[str | None] = mapped_column(Text, nullable=True)
     country: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")

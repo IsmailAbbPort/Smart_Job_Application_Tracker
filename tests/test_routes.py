@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.ingest import runner
-from app.ingest.geo import resolve_country
+from app.ingest.geo import resolve_city, resolve_country
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -25,6 +25,7 @@ def _make_job(source, source_id, title, company, *, is_remote, location, posted_
         company=company,
         location=location,
         is_remote=is_remote,
+        city=resolve_city(location),
         country=country,
         is_european=country is not None,
         description=f"{title} at {company}",
@@ -131,6 +132,14 @@ def test_filter_by_country(client, session_factory):
     body = client.get("/jobs", params={"country": "france"}).json()
     assert body["total"] == 1
     assert body["items"][0]["company"] == "Mistral AI"
+
+
+def test_filter_by_city(client, session_factory):
+    _seed(session_factory)
+    body = client.get("/jobs", params={"city": "paris"}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["company"] == "Mistral AI"
+    assert body["items"][0]["city"] == "Paris"
 
 
 def test_pagination(client, session_factory):

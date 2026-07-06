@@ -59,64 +59,69 @@ _COUNTRY_ALIASES: dict[str, list[str]] = {
     "Cyprus": ["cyprus"],
 }
 
-# Major European cities -> country, for locations that name only a city.
-_CITY_TO_COUNTRY: dict[str, str] = {
-    "london": "United Kingdom",
-    "manchester": "United Kingdom",
-    "edinburgh": "United Kingdom",
-    "dublin": "Ireland",
-    "cork": "Ireland",
-    "berlin": "Germany",
-    "munich": "Germany",
-    "münchen": "Germany",
-    "hamburg": "Germany",
-    "cologne": "Germany",
-    "köln": "Germany",
-    "frankfurt": "Germany",
-    "paris": "France",
-    "lyon": "France",
-    "toulouse": "France",
-    "madrid": "Spain",
-    "barcelona": "Spain",
-    "valencia": "Spain",
-    "lisbon": "Portugal",
-    "porto": "Portugal",
-    "milan": "Italy",
-    "rome": "Italy",
-    "roma": "Italy",
-    "turin": "Italy",
-    "amsterdam": "Netherlands",
-    "rotterdam": "Netherlands",
-    "the hague": "Netherlands",
-    "brussels": "Belgium",
-    "antwerp": "Belgium",
-    "zurich": "Switzerland",
-    "zürich": "Switzerland",
-    "geneva": "Switzerland",
-    "vienna": "Austria",
-    "wien": "Austria",
-    "warsaw": "Poland",
-    "krakow": "Poland",
-    "kraków": "Poland",
-    "prague": "Czechia",
-    "praha": "Czechia",
-    "bratislava": "Slovakia",
-    "ljubljana": "Slovenia",
-    "budapest": "Hungary",
-    "bucharest": "Romania",
-    "sofia": "Bulgaria",
-    "athens": "Greece",
-    "zagreb": "Croatia",
-    "copenhagen": "Denmark",
-    "stockholm": "Sweden",
-    "gothenburg": "Sweden",
-    "helsinki": "Finland",
-    "espoo": "Finland",
-    "oslo": "Norway",
-    "reykjavik": "Iceland",
-    "tallinn": "Estonia",
-    "riga": "Latvia",
-    "vilnius": "Lithuania",
+# Major European cities: alias -> (canonical city, country). Aliases fold spelling
+# variants (München -> Munich) so "Munich", "Munich, Germany", "München, Bayern"
+# all resolve to the same canonical (Munich, Germany).
+_CITY_ALIASES: dict[str, tuple[str, str]] = {
+    "london": ("London", "United Kingdom"),
+    "manchester": ("Manchester", "United Kingdom"),
+    "edinburgh": ("Edinburgh", "United Kingdom"),
+    "dublin": ("Dublin", "Ireland"),
+    "cork": ("Cork", "Ireland"),
+    "berlin": ("Berlin", "Germany"),
+    "munich": ("Munich", "Germany"),
+    "münchen": ("Munich", "Germany"),
+    "muenchen": ("Munich", "Germany"),
+    "hamburg": ("Hamburg", "Germany"),
+    "cologne": ("Cologne", "Germany"),
+    "köln": ("Cologne", "Germany"),
+    "koeln": ("Cologne", "Germany"),
+    "frankfurt": ("Frankfurt", "Germany"),
+    "paris": ("Paris", "France"),
+    "lyon": ("Lyon", "France"),
+    "toulouse": ("Toulouse", "France"),
+    "madrid": ("Madrid", "Spain"),
+    "barcelona": ("Barcelona", "Spain"),
+    "valencia": ("Valencia", "Spain"),
+    "lisbon": ("Lisbon", "Portugal"),
+    "porto": ("Porto", "Portugal"),
+    "milan": ("Milan", "Italy"),
+    "milano": ("Milan", "Italy"),
+    "rome": ("Rome", "Italy"),
+    "roma": ("Rome", "Italy"),
+    "turin": ("Turin", "Italy"),
+    "amsterdam": ("Amsterdam", "Netherlands"),
+    "rotterdam": ("Rotterdam", "Netherlands"),
+    "the hague": ("The Hague", "Netherlands"),
+    "brussels": ("Brussels", "Belgium"),
+    "antwerp": ("Antwerp", "Belgium"),
+    "zurich": ("Zurich", "Switzerland"),
+    "zürich": ("Zurich", "Switzerland"),
+    "geneva": ("Geneva", "Switzerland"),
+    "vienna": ("Vienna", "Austria"),
+    "wien": ("Vienna", "Austria"),
+    "warsaw": ("Warsaw", "Poland"),
+    "krakow": ("Krakow", "Poland"),
+    "kraków": ("Krakow", "Poland"),
+    "prague": ("Prague", "Czechia"),
+    "praha": ("Prague", "Czechia"),
+    "bratislava": ("Bratislava", "Slovakia"),
+    "ljubljana": ("Ljubljana", "Slovenia"),
+    "budapest": ("Budapest", "Hungary"),
+    "bucharest": ("Bucharest", "Romania"),
+    "sofia": ("Sofia", "Bulgaria"),
+    "athens": ("Athens", "Greece"),
+    "zagreb": ("Zagreb", "Croatia"),
+    "copenhagen": ("Copenhagen", "Denmark"),
+    "stockholm": ("Stockholm", "Sweden"),
+    "gothenburg": ("Gothenburg", "Sweden"),
+    "helsinki": ("Helsinki", "Finland"),
+    "espoo": ("Espoo", "Finland"),
+    "oslo": ("Oslo", "Norway"),
+    "reykjavik": ("Reykjavik", "Iceland"),
+    "tallinn": ("Tallinn", "Estonia"),
+    "riga": ("Riga", "Latvia"),
+    "vilnius": ("Vilnius", "Lithuania"),
 }
 
 # Region-only tokens: European but no specific country.
@@ -137,7 +142,8 @@ def _compile(aliases: dict[str, str]) -> list[tuple[re.Pattern[str], str]]:
 _COUNTRY_PATTERNS = _compile(
     {alias: canonical for canonical, aliases in _COUNTRY_ALIASES.items() for alias in aliases}
 )
-_CITY_PATTERNS = _compile(_CITY_TO_COUNTRY)
+_CITY_COUNTRY_PATTERNS = _compile({a: country for a, (_c, country) in _CITY_ALIASES.items()})
+_CITY_NAME_PATTERNS = _compile({a: city for a, (city, _country) in _CITY_ALIASES.items()})
 _REGION_PATTERNS = _compile({alias: _EUROPE for alias in _REGION_ALIASES})
 
 
@@ -151,11 +157,37 @@ def resolve_country(location: str | None) -> str | None:
     if not location:
         return None
     text = location.lower()
-    for patterns in (_COUNTRY_PATTERNS, _CITY_PATTERNS, _REGION_PATTERNS):
+    for patterns in (_COUNTRY_PATTERNS, _CITY_COUNTRY_PATTERNS, _REGION_PATTERNS):
         for pattern, canonical in patterns:
             if pattern.search(text):
                 return canonical
     return None
+
+
+def resolve_city(location: str | None) -> str | None:
+    """Return the canonical city for a known European city, else None.
+
+    Coverage is the curated set above (major EU hubs). Unknown/smaller towns
+    return None and callers fall back to the raw location.
+    """
+    if not location:
+        return None
+    text = location.lower()
+    for pattern, canonical in _CITY_NAME_PATTERNS:
+        if pattern.search(text):
+            return canonical
+    return None
+
+
+def location_identity(location: str | None) -> str:
+    """Canonical location string for dedup: "City, Country" | "Country" | "".
+
+    Collapses spelling/format variants of the same place. Returns "" when the
+    location is unknown/non-European, so callers fall back to the raw location.
+    """
+    city = resolve_city(location)
+    country = resolve_country(location)
+    return ", ".join(p for p in (city, country) if p)
 
 
 def is_european(location: str | None) -> bool:

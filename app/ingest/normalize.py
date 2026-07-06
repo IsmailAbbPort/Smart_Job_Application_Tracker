@@ -11,6 +11,8 @@ import html
 import re
 from datetime import UTC, datetime
 
+from app.ingest import geo
+
 # Legal-entity suffixes stripped from company names so "Qonto SAS" == "Qonto".
 _COMPANY_SUFFIXES = {
     "inc",
@@ -76,12 +78,18 @@ def normalize_location(value: str | None) -> str:
 
 
 def dedup_key(company: str | None, title: str | None, location: str | None) -> str:
-    """Composite cross-source identity: normalized company|title|location."""
+    """Composite cross-source identity: normalized company|title|location.
+
+    Location uses the canonical geo identity ("Munich, Germany" for every Munich
+    spelling/format variant) so the same role from two sources collapses. Unknown
+    locations fall back to the lightly-normalized raw string.
+    """
+    canonical_location = geo.location_identity(location) or normalize_location(location)
     return "|".join(
         (
             normalize_company(company),
             normalize_title(title),
-            normalize_location(location),
+            canonical_location.lower(),
         )
     )
 

@@ -23,6 +23,7 @@ def list_jobs(
         default=None, description="Only European-located jobs (true) or non-European (false)"
     ),
     country: str | None = Query(default=None, description="Filter by resolved country"),
+    city: str | None = Query(default=None, description="Filter by resolved (canonical) city"),
     q: str | None = Query(default=None, description="Substring match on title or company"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -36,6 +37,8 @@ def list_jobs(
         filters.append(Job.is_european == europe)
     if country is not None:
         filters.append(func.lower(Job.country) == country.lower())
+    if city is not None:
+        filters.append(func.lower(Job.city) == city.lower())
     if company is not None:
         filters.append(Job.company_norm.contains(company.lower()))
     if q is not None:
