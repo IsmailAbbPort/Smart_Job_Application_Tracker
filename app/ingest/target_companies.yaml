@@ -1,0 +1,61 @@
+# Target companies monitored directly via their public ATS job boards (Phase 1 ingest).
+#
+# This is the "I monitor my ~30 target EU companies' ATS boards directly" story from
+# the plan (docs/RESEARCH_AND_PLAN.md, section A1). Slugs are the board identifiers in
+# each ATS's public, no-auth JSON endpoint.
+#
+# ats: one of greenhouse | lever | ashby   (endpoint shape differs per vendor)
+# slug: the {company} path segment in that vendor's public board URL
+#
+# VERIFIED 2026-07-06 with scripts/probe_ats.py (--reserves --try-all). Inline
+# comments show the live open-job count at verification time. Re-probe periodically:
+# board slugs go stale and companies migrate ATS vendors.
+
+companies:
+  - { company: GitLab,       ats: greenhouse, slug: gitlab,       hq: All-remote,              remote_policy: Fully distributed }        #  142
+  - { company: Remote.com,   ats: greenhouse, slug: remotecom,    hq: Remote-first,            remote_policy: Global-remote }            #  287
+  - { company: Elastic,      ats: greenhouse, slug: elastic,      hq: Amsterdam / distributed, remote_policy: All-remote }               #  203
+  - { company: Grafana Labs, ats: greenhouse, slug: grafanalabs,  hq: Stockholm / remote,      remote_policy: Remote-first }             #  107
+  - { company: DeepL,        ats: ashby,      slug: deepl,        hq: Cologne,                 remote_policy: Hybrid/remote, AI/NLP }    #   25
+  - { company: Mistral AI,   ats: lever,      slug: mistral,      hq: Paris,                   remote_policy: Hybrid, frontier AI }      #  177
+  - { company: Synthesia,    ats: ashby,      slug: synthesia,    hq: London / remote,         remote_policy: Remote-friendly, AI }      #   73
+  - { company: ElevenLabs,   ats: ashby,      slug: elevenlabs,   hq: London / remote,         remote_policy: Remote-first, AI audio }   #  144
+  - { company: Dataiku,      ats: greenhouse, slug: dataiku,      hq: Paris / NY,              remote_policy: Hybrid/remote, ML }        #   39
+  - { company: Algolia,      ats: greenhouse, slug: algolia,      hq: Paris,                   remote_policy: Remote-friendly }          #   44
+  - { company: Aircall,      ats: lever,      slug: aircall,      hq: Paris / NY,              remote_policy: Hybrid/remote }            #   89
+  - { company: Qonto,        ats: lever,      slug: qonto,        hq: Paris,                   remote_policy: Remote-friendly }          #   48
+  - { company: Alan,         ats: ashby,      slug: alan,         hq: Paris,                   remote_policy: Remote-first }             #   87
+  - { company: Back Market,  ats: ashby,      slug: backmarket,   hq: Paris,                   remote_policy: Remote-friendly }          #   14
+  - { company: BlaBlaCar,    ats: lever,      slug: blablacar,    hq: Paris,                   remote_policy: Hybrid/remote }            #   15
+  - { company: Ledger,       ats: lever,      slug: ledger,       hq: Paris,                   remote_policy: Hybrid/remote }            #    1
+  - { company: Contentful,   ats: greenhouse, slug: contentful,   hq: Berlin,                  remote_policy: Remote-first }             #   35
+  - { company: GetYourGuide, ats: greenhouse, slug: getyourguide, hq: Berlin,                  remote_policy: Hybrid/remote }            #   59
+  - { company: N26,          ats: greenhouse, slug: n26,          hq: Berlin,                  remote_policy: Hybrid/remote }            #   71
+  - { company: HelloFresh,   ats: greenhouse, slug: hellofresh,   hq: Berlin,                  remote_policy: Hybrid }                   #  382
+  - { company: SumUp,        ats: greenhouse, slug: sumup,        hq: Berlin / London,         remote_policy: Remote-friendly }          #  426
+  - { company: Monzo,        ats: greenhouse, slug: monzo,        hq: London,                  remote_policy: Remote-friendly }          #   67
+  - { company: Wolt,         ats: greenhouse, slug: wolt,         hq: Helsinki,                remote_policy: Hybrid/remote }            #  288
+  # Verified reserves (folded in - all live with public boards):
+  - { company: Spotify,      ats: lever,      slug: spotify,      hq: Stockholm,               remote_policy: Work-from-anywhere }       #  113
+  - { company: Adyen,        ats: greenhouse, slug: adyen,        hq: Amsterdam,               remote_policy: Hybrid }                   #  208
+  - { company: Miro,         ats: ashby,      slug: miro,         hq: Amsterdam,               remote_policy: Hybrid/remote }            #   33
+  - { company: Mollie,       ats: ashby,      slug: mollie,       hq: Amsterdam,               remote_policy: Hybrid/remote }            #   49
+  - { company: Typeform,     ats: greenhouse, slug: typeform,     hq: Barcelona,               remote_policy: Remote-friendly }          #   16
+  - { company: Pipedrive,    ats: lever,      slug: pipedrive,    hq: Tallinn,                 remote_policy: Hybrid/remote }            #    7
+  - { company: Celonis,      ats: greenhouse, slug: celonis,      hq: Munich,                  remote_policy: Hybrid/remote }            #  209
+  - { company: Photoroom,    ats: ashby,      slug: photoroom,    hq: Paris,                   remote_policy: Hybrid, AI }               #   14
+  - { company: Pennylane,    ats: ashby,      slug: pennylane,    hq: Paris,                   remote_policy: Hybrid/remote }            #  134
+
+# Declared slug returned 404/empty on all three vendors as of 2026-07-06. The company
+# likely uses a different slug or a non-Greenhouse/Lever/Ashby ATS (SmartRecruiters,
+# Workday, custom). Find the real slug from their careers page, then move up + re-probe.
+needs_slug_fix:
+  - { company: Hugging Face, tried: [lever, greenhouse, ashby], note: "custom board? check apply.workable / hf.co/jobs" }
+  - { company: Personio,     tried: [greenhouse, lever, ashby], note: "likely SmartRecruiters" }
+  - { company: Wise,         tried: [greenhouse, lever, ashby], note: "try slug 'wisecareers' / 'transferwise'" }
+  - { company: Checkout.com, tried: [greenhouse, lever, ashby], note: "try slug 'checkout'" }
+  - { company: Vinted,       tried: [greenhouse, lever, ashby], note: "likely non-GH ATS" }
+  - { company: TravelPerk,   tried: [greenhouse, lever, ashby], note: "try 'travelperk' variants" }
+  - { company: Klarna,       tried: [greenhouse, lever, ashby], note: "likely Workday/SmartRecruiters" }
+  - { company: Payhawk,      tried: [greenhouse, lever, ashby], note: "check careers page ATS" }
+  - { company: Bolt,         tried: [greenhouse, ashby, lever], note: "ashby board resolves but returns 0 jobs - wrong slug" }

@@ -25,3 +25,6 @@ test:           ## Run the test suite
 
 check: lint test  ## Lint + test (what CI runs)
 	uv run black --check .
+
+probe:          ## Verify target-company ATS slugs are live (needs uv, or run in Docker)
+	uv run python scripts/probe_ats.py --reserves --try-all
