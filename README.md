@@ -7,8 +7,7 @@ cover letters that are checked for fabrication, and track the pipeline end to en
 > Built Python-first (FastAPI) and dogfooded during a real job search. This README
 > will lead with dogfood metrics (jobs ingested, applications sent, interviews) once
 > those exist. See [docs/RESEARCH_AND_PLAN.md](docs/RESEARCH_AND_PLAN.md) for the
-> full concept briefing and phased build plan, and
-> [docs/CONCEPTS_PRIMER.md](docs/CONCEPTS_PRIMER.md) for the fundamentals primer.
+> full concept briefing and phased build plan.
 
 ## Status
 

@@ -5,8 +5,6 @@
 > **Part B** is the phased build plan.
 >
 > Decisions locked up front: **Python-first (FastAPI) backend + thin React frontend**, **API-first job data with selective polite scraping**, built as a **polished showcase**, dogfooded during a real EU remote job search.
->
-> **New to embeddings / RAG / rerank / pgvector / evals? Read [CONCEPTS_PRIMER.md](CONCEPTS_PRIMER.md) first** — it explains every fundamental this plan assumes, from zero, and maps each to the build phase that uses it.
 
 ---
 
