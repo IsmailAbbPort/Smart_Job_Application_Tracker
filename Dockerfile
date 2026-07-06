@@ -12,9 +12,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Install deps first (cached layer) using only the lock + manifest.
-# Once you run `uv lock` and commit uv.lock, add `--frozen` here for reproducible builds.
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-install-project --no-dev
+# --frozen: use uv.lock exactly; fail if it's missing or out of date (reproducible builds).
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Then the app code.
 COPY app ./app
