@@ -33,17 +33,42 @@ def test_resolve_country_european(location, expected):
         "Remote",
         "Anywhere",
         "San Francisco, CA",
+        "Toronto, Ontario, Canada",
+        "Singapore",
         None,
         "",
     ],
 )
-def test_resolve_country_non_european(location):
-    assert resolve_country(location) is None
+def test_non_european_not_flagged(location):
+    # country may resolve (e.g. United States), but is_european must be False.
     assert is_european(location) is False
+    assert resolve_city(location) is None  # city is European-only
+
+
+@pytest.mark.parametrize(
+    ("location", "expected_country"),
+    [
+        ("Aurora, IL, United States", "United States"),
+        ("Remote, US", "United States"),
+        ("Toronto, Ontario, Canada", "Canada"),
+        ("Worldwide", None),
+        ("Remote", None),
+    ],
+)
+def test_resolve_country_non_european_value(location, expected_country):
+    assert resolve_country(location) == expected_country
 
 
 def test_is_european_true():
     assert is_european("Remote, Spain") is True
+
+
+def test_country_needs_full_segment_not_fragment():
+    # "wales" inside "New South Wales" must NOT resolve to the UK.
+    assert resolve_country("Sydney, New South Wales, Australia") == "Australia"
+    assert is_european("Sydney, New South Wales, Australia") is False
+    # But "Wales" as its own segment still resolves to the UK.
+    assert resolve_country("Cardiff, Wales") == "United Kingdom"
 
 
 @pytest.mark.parametrize(
@@ -72,7 +97,7 @@ def test_resolve_city(location, expected):
         ("München", "Munich, Germany"),
         ("Remote, Germany", "Germany"),  # country only
         ("Worldwide", ""),  # unknown -> empty (caller falls back to raw)
-        ("Austin, TX", ""),
+        ("Austin, TX", "United States"),  # US city: country resolves, city stays None
     ],
 )
 def test_location_identity(location, expected):

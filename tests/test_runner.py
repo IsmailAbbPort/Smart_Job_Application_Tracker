@@ -108,7 +108,9 @@ def test_geo_derived_on_ingest(session, monkeypatch):
     assert by_id["eu"].country == "Germany" and by_id["eu"].is_european is True
     assert by_id["eu"].city is None  # country only, no known city
     assert by_id["muc"].city == "Munich" and by_id["muc"].country == "Germany"
-    assert by_id["us"].country is None and by_id["us"].is_european is False
+    # US country resolves, but it is not European and has no (European) city.
+    assert by_id["us"].country == "United States"
+    assert by_id["us"].is_european is False and by_id["us"].city is None
     assert by_id["ww"].is_european is False  # "Worldwide" is not treated as European
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.ingest import runner
-from app.ingest.geo import resolve_city, resolve_country
+from app.ingest.geo import is_european, resolve_city, resolve_country
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -17,7 +17,6 @@ from tests.conftest import FakeSource, make_canonical
 
 
 def _make_job(source, source_id, title, company, *, is_remote, location, posted_year=2026) -> Job:
-    country = resolve_country(location)
     return Job(
         source=source,
         source_id=source_id,
@@ -26,8 +25,8 @@ def _make_job(source, source_id, title, company, *, is_remote, location, posted_
         location=location,
         is_remote=is_remote,
         city=resolve_city(location),
-        country=country,
-        is_european=country is not None,
+        country=resolve_country(location),
+        is_european=is_european(location),
         description=f"{title} at {company}",
         url=f"https://example.com/{source_id}",
         posted_at=datetime(posted_year, 6, 1, tzinfo=UTC),

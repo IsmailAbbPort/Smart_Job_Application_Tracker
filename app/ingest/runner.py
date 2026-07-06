@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.ingest import cache
 from app.ingest.base import CanonicalJob, Source
-from app.ingest.geo import resolve_city, resolve_country
+from app.ingest.geo import is_european, resolve_city, resolve_country
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -90,10 +90,11 @@ def _apply_fields(job: Job, cj: CanonicalJob) -> None:
     job.title_norm = normalize_title(cj.title)
     job.location_norm = normalize_location(cj.location)
     job.dedup_key = dedup_key(cj.company, cj.title, cj.location)
-    # Derived geo: city/country are None when non-European/unknown.
+    # Derived geo: country is the actual country (any continent); city is European
+    # only; is_european gates the EU-remote search.
     job.city = resolve_city(cj.location)
     job.country = resolve_country(cj.location)
-    job.is_european = job.country is not None
+    job.is_european = is_european(cj.location)
 
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:
