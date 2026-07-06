@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "slug": "ux-designer-berlin-99001",
+      "company_name": "Activate Media GmbH",
+      "title": "UX Designer",
+      "description": "<p>Join our <strong>remote</strong> design team &amp; build things.</p>",
+      "remote": true,
+      "url": "https://www.arbeitnow.com/jobs/ux-designer-berlin-99001",
+      "tags": ["design"],
+      "job_types": ["full_time"],
+      "location": "Berlin",
+      "created_at": 1751792400
+    }
+  ],
+  "links": { "next": null },
+  "meta": { "current_page": 1 }
+}

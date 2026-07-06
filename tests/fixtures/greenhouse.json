@@ -1,0 +1,25 @@
+{
+  "jobs": [
+    {
+      "id": 123,
+      "title": "Senior Backend Engineer",
+      "location": { "name": "Remote, Germany" },
+      "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/123",
+      "first_published": "2026-04-17T05:58:03-04:00",
+      "updated_at": "2026-06-05T16:18:10-04:00",
+      "content": "&lt;div class=&quot;intro&quot;&gt;&lt;p&gt;Build &amp;amp; ship software.&lt;/p&gt;&lt;/div&gt;",
+      "company_name": "GitLab"
+    },
+    {
+      "id": 124,
+      "title": "Office Manager",
+      "location": { "name": "Berlin" },
+      "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/124",
+      "first_published": "2026-05-01T00:00:00-04:00",
+      "updated_at": "2026-05-02T00:00:00-04:00",
+      "content": "&lt;p&gt;Onsite role&lt;/p&gt;",
+      "company_name": "GitLab"
+    }
+  ],
+  "meta": { "total": 2 }
+}

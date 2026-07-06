@@ -1,0 +1,31 @@
+{
+  "jobs": [
+    {
+      "id": "uuid-1",
+      "title": "ML Engineer",
+      "department": "Engineering",
+      "employmentType": "FullTime",
+      "location": "Europe",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "publishedAt": "2026-04-20T20:17:19.177+00:00",
+      "jobUrl": "https://jobs.ashbyhq.com/synthesia/uuid-1",
+      "applyUrl": "https://jobs.ashbyhq.com/synthesia/uuid-1/application",
+      "descriptionPlain": "Ship AI video products.",
+      "descriptionHtml": "<p>Ship AI video products.</p>"
+    },
+    {
+      "id": "uuid-2",
+      "title": "Unlisted Draft Role",
+      "location": "London",
+      "isListed": false,
+      "isRemote": false,
+      "workplaceType": "Onsite",
+      "publishedAt": "2026-04-20T20:17:19.177+00:00",
+      "jobUrl": "https://jobs.ashbyhq.com/synthesia/uuid-2",
+      "descriptionPlain": "Should be skipped."
+    }
+  ],
+  "apiVersion": "1"
+}

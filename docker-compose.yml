@@ -24,6 +24,8 @@ services:
       # Point at the compose db service (not localhost).
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/jobtracker
       ENVIRONMENT: development
+    # Apply migrations, then serve. DB is guaranteed healthy via depends_on above.
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
 

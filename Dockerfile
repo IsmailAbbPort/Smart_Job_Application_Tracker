@@ -16,8 +16,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 
-# Then the app code.
+# Then the app code + migrations.
 COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./alembic.ini
 
 # Put the project's venv on PATH.
 ENV PATH="/app/.venv/bin:$PATH"

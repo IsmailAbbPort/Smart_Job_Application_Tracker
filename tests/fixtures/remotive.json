@@ -1,0 +1,20 @@
+{
+  "0-legal-notice": "Remotive API - attribution required.",
+  "job-count": 1,
+  "total-job-count": 1,
+  "jobs": [
+    {
+      "id": 1749306,
+      "url": "https://remotive.com/remote-jobs/writing/copywriter-1749306",
+      "title": "Copywriter",
+      "company_name": "Coalition Technologies ",
+      "category": "Writing",
+      "tags": ["seo", "content"],
+      "job_type": "freelance",
+      "publication_date": "2026-07-02T20:01:13",
+      "candidate_required_location": "Worldwide",
+      "salary": "$20k -$35k",
+      "description": "<p class=\"h3\">Write high-quality content &amp; SEO copy.</p>"
+    }
+  ]
+}

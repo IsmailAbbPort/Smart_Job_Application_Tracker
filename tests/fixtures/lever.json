@@ -1,0 +1,22 @@
+[
+  {
+    "id": "abc-1",
+    "text": "Data Scientist",
+    "categories": { "location": "Paris", "commitment": "Full-time", "team": "AI" },
+    "workplaceType": "remote",
+    "descriptionPlain": "Do machine learning at scale.",
+    "description": "<p>Do machine learning at scale.</p>",
+    "hostedUrl": "https://jobs.lever.co/mistral/abc-1",
+    "applyUrl": "https://jobs.lever.co/mistral/abc-1/apply",
+    "createdAt": 1753687796431
+  },
+  {
+    "id": "abc-2",
+    "text": "Office Assistant",
+    "categories": { "location": "Paris", "commitment": "Full-time", "team": "Ops" },
+    "workplaceType": "on-site",
+    "descriptionPlain": "Support the Paris office.",
+    "hostedUrl": "https://jobs.lever.co/mistral/abc-2",
+    "createdAt": 1753600000000
+  }
+]
