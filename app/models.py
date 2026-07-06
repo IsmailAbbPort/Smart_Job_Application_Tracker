@@ -45,20 +45,22 @@ class Job(Base):
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     source_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Raw canonical fields
-    title: Mapped[str] = mapped_column(String(512), nullable=False)
-    company: Mapped[str] = mapped_column(String(255), nullable=False)
-    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Raw canonical fields. Free text is Text (unbounded): job boards emit very
+    # long titles/locations (Greenhouse concatenates every office), and a length
+    # cap would drop whole batches. Postgres Text is as efficient as varchar.
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    company: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_remote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Normalized forms (for dedup + fast filtering)
-    company_norm: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    title_norm: Mapped[str] = mapped_column(String(512), nullable=False, default="")
-    location_norm: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    dedup_key: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    company_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    title_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    location_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    dedup_key: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
     # Bookkeeping
     ingested_at: Mapped[datetime] = mapped_column(

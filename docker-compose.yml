@@ -29,5 +29,16 @@ services:
     ports:
       - "8000:8000"
 
+  # Lightweight browser-based DB viewer for local dev (http://localhost:8080).
+  # Login: System=PostgreSQL, Server=db, User=postgres, Password=postgres, DB=jobtracker.
+  adminer:
+    image: adminer:4
+    depends_on:
+      - db
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "8080:8080"
+
 volumes:
   pgdata:

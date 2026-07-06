@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 
 import httpx
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.ingest import cache
 from app.ingest.base import CanonicalJob, Source
@@ -156,14 +156,23 @@ def ingest_source(
 
 
 def ingest_all(session: Session, *, force: bool = False) -> IngestSummary:
-    """Ingest every registered source, sharing one HTTP client."""
+    """Ingest every registered source.
+
+    Each source runs in its OWN session (bound to the caller's engine) so a
+    failure in one source's transaction can't corrupt another's - one bad source
+    fails in isolation with its error captured in stats. One HTTP client is shared.
+    """
     summary = IngestSummary()
+    maker = sessionmaker(bind=session.get_bind(), autoflush=False, expire_on_commit=False)
     client = httpx.Client(
         headers={"User-Agent": _USER_AGENT}, timeout=_TIMEOUT, follow_redirects=True
     )
     try:
         for name in SOURCES:
-            summary.results.append(ingest_source(session, name, force=force, client=client))
+            with maker() as source_session:
+                summary.results.append(
+                    ingest_source(source_session, name, force=force, client=client)
+                )
     finally:
         client.close()
     return summary
