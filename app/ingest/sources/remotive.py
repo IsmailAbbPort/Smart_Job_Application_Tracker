@@ -9,6 +9,7 @@ job_type, publication_date (naive ISO), description (HTML), ...}], "0-legal-noti
 from __future__ import annotations
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.ingest.base import CanonicalJob
 from app.ingest.normalize import html_to_text, parse_dt
@@ -42,7 +43,7 @@ class RemotiveSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
 
-    def fetch(self, client: httpx.Client) -> list[CanonicalJob]:
+    def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         resp = client.get(_BASE)
         if resp.status_code != 200:
             return []

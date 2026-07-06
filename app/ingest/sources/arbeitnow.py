@@ -8,6 +8,7 @@ we pull a bounded number of pages to stay polite.
 from __future__ import annotations
 
 import httpx
+from sqlalchemy.orm import Session
 
 from app.ingest.base import CanonicalJob
 from app.ingest.normalize import html_to_text, parse_dt
@@ -41,7 +42,7 @@ class ArbeitnowSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
 
-    def fetch(self, client: httpx.Client) -> list[CanonicalJob]:
+    def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []
         url: str | None = _BASE
         for _ in range(_MAX_PAGES):

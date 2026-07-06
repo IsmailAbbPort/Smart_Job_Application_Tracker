@@ -62,7 +62,7 @@ class FakeSource:
         self.ttl_seconds = ttl_seconds
         self._jobs = jobs
 
-    def fetch(self, client) -> list[CanonicalJob]:  # noqa: ANN001 - client unused
+    def fetch(self, client, session) -> list[CanonicalJob]:  # noqa: ANN001 - args unused
         return list(self._jobs)
 
 
@@ -72,7 +72,7 @@ class BrokenSource:
     name = "broken"
     ttl_seconds = 3600
 
-    def fetch(self, client):  # noqa: ANN001
+    def fetch(self, client, session):  # noqa: ANN001
         raise RuntimeError("boom")
 
 

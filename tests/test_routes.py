@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.ingest import runner
+from app.ingest.geo import resolve_country
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -16,6 +17,7 @@ from tests.conftest import FakeSource, make_canonical
 
 
 def _make_job(source, source_id, title, company, *, is_remote, location, posted_year=2026) -> Job:
+    country = resolve_country(location)
     return Job(
         source=source,
         source_id=source_id,
@@ -23,6 +25,8 @@ def _make_job(source, source_id, title, company, *, is_remote, location, posted_
         company=company,
         location=location,
         is_remote=is_remote,
+        country=country,
+        is_european=country is not None,
         description=f"{title} at {company}",
         url=f"https://example.com/{source_id}",
         posted_at=datetime(posted_year, 6, 1, tzinfo=UTC),
@@ -102,6 +106,29 @@ def test_filter_by_query(client, session_factory):
 def test_filter_by_company(client, session_factory):
     _seed(session_factory)
     body = client.get("/jobs", params={"company": "mistral"}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["company"] == "Mistral AI"
+
+
+def test_filter_by_europe(client, session_factory):
+    _seed(session_factory)
+    body = client.get("/jobs", params={"europe": "true"}).json()
+    # GitLab (Germany) + Data Scientist (Paris); Copywriter (Worldwide) excluded.
+    assert body["total"] == 2
+    assert {i["company"] for i in body["items"]} == {"GitLab", "Mistral AI"}
+
+
+def test_filter_remote_european(client, session_factory):
+    _seed(session_factory)
+    # The user's actual scope: remote AND located in Europe.
+    body = client.get("/jobs", params={"is_remote": "true", "europe": "true"}).json()
+    assert body["total"] == 1
+    assert body["items"][0]["company"] == "GitLab"  # Paris role is not remote; Worldwide not EU
+
+
+def test_filter_by_country(client, session_factory):
+    _seed(session_factory)
+    body = client.get("/jobs", params={"country": "france"}).json()
     assert body["total"] == 1
     assert body["items"][0]["company"] == "Mistral AI"
 

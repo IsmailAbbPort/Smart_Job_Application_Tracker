@@ -19,6 +19,10 @@ def list_jobs(
     source: str | None = Query(default=None, description="Filter by source"),
     company: str | None = Query(default=None, description="Substring match on company"),
     is_remote: bool | None = Query(default=None),
+    europe: bool | None = Query(
+        default=None, description="Only European-located jobs (true) or non-European (false)"
+    ),
+    country: str | None = Query(default=None, description="Filter by resolved country"),
     q: str | None = Query(default=None, description="Substring match on title or company"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -28,6 +32,10 @@ def list_jobs(
         filters.append(Job.source == source)
     if is_remote is not None:
         filters.append(Job.is_remote == is_remote)
+    if europe is not None:
+        filters.append(Job.is_european == europe)
+    if country is not None:
+        filters.append(func.lower(Job.country) == country.lower())
     if company is not None:
         filters.append(Job.company_norm.contains(company.lower()))
     if q is not None:

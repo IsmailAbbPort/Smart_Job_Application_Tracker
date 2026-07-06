@@ -94,6 +94,21 @@ def test_error_is_captured_not_raised(session, monkeypatch):
     assert _count(session) == 0
 
 
+def test_geo_derived_on_ingest(session, monkeypatch):
+    jobs = [
+        make_canonical(source_id="eu", location="Remote, Germany"),
+        make_canonical(source_id="us", location="Aurora, IL, United States"),
+        make_canonical(source_id="ww", location="Worldwide"),
+    ]
+    monkeypatch.setitem(runner.SOURCES, "fake", FakeSource("fake", jobs))
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+
+    by_id = {j.source_id: j for j in session.scalars(select(Job)).all()}
+    assert by_id["eu"].country == "Germany" and by_id["eu"].is_european is True
+    assert by_id["us"].country is None and by_id["us"].is_european is False
+    assert by_id["ww"].is_european is False  # "Worldwide" is not treated as European
+
+
 def test_unknown_source_raises(session):
     try:
         runner.ingest_source(session, "does-not-exist", force=True)

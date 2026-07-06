@@ -9,9 +9,11 @@ from __future__ import annotations
 import time
 
 import httpx
+from sqlalchemy.orm import Session
 
-from app.ingest.base import CanonicalJob, load_targets
+from app.ingest.base import CanonicalJob
 from app.ingest.normalize import parse_dt
+from app.ingest.targets import active_targets
 
 NAME = "ashby"
 TTL_SECONDS = 6 * 3600
@@ -45,13 +47,12 @@ class AshbySource:
     name = NAME
     ttl_seconds = TTL_SECONDS
 
-    def fetch(self, client: httpx.Client) -> list[CanonicalJob]:
+    def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []
-        for target in load_targets(NAME):
-            slug, company = target["slug"], target["company"]
-            resp = client.get(_BASE.format(slug=slug))
+        for target in active_targets(session, NAME):
+            resp = client.get(_BASE.format(slug=target.slug))
             if resp.status_code != 200:
                 continue
-            out.extend(parse(resp.json(), slug=slug, company=company))
+            out.extend(parse(resp.json(), slug=target.slug, company=target.company))
             time.sleep(_POLITE_DELAY)
         return out

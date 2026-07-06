@@ -20,9 +20,14 @@ Postgres, deduped and served by a `/jobs` API. No AI yet (Phases 2-7).
   per-source TTL throttle so rate-limited feeds (Remotive) are polled politely.
 - **Dedup:** `(source, source_id)` for re-poll idempotency + a normalized
   `(company, title, location)` key for cross-source dedup.
-- **Read:** `GET /jobs` with source / remote / company / text filters + pagination.
-- Verified end to end: `docker compose up` -> Alembic migrates -> ingested 330 real
-  jobs from live feeds. 53 tests green.
+- **Read:** `GET /jobs` with source / remote / **europe** / country / company / text
+  filters + pagination. Every job gets a best-effort `country` + `is_european` flag
+  derived from its location, so `?is_remote=true&europe=true` gives the actual
+  EU-remote search scope (US/Worldwide-remote roles are stored but filtered out).
+- **Adjustable targets:** monitored companies live in a `target_company` table
+  (seeded from YAML), editable at runtime via `/targets` (list/add/toggle/delete).
+- Verified end to end: `docker compose up` -> Alembic migrates + seeds -> ingested
+  ~3,900 real jobs (582 remote-European). 78 tests green.
 
 Phase 0 (skeleton & rails: FastAPI, Docker Compose, CI, health endpoints) is also complete.
 
@@ -56,8 +61,11 @@ Then:
 curl -X POST "http://localhost:8000/ingest/arbeitnow?force=true"
 curl -X POST "http://localhost:8000/ingest/remotive?force=true"
 
-# Browse the deduped feed (filters: source, is_remote, company, q; plus limit/offset).
-curl "http://localhost:8000/jobs?is_remote=true&q=engineer&limit=10"
+# Browse the deduped feed. Filters: source, is_remote, europe, country, company, q.
+curl "http://localhost:8000/jobs?is_remote=true&europe=true&q=engineer&limit=10"
+
+# Manage which company ATS boards are monitored (backs a future UI).
+curl "http://localhost:8000/targets?ats=greenhouse"
 ```
 
 Verify target-company ATS slugs are live before ingesting: `make probe`.

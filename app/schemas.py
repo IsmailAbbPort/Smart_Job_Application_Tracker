@@ -16,7 +16,9 @@ class JobOut(BaseModel):
     title: str
     company: str
     location: str | None
+    country: str | None
     is_remote: bool
+    is_european: bool
     url: str
     posted_at: datetime | None
     ingested_at: datetime
@@ -31,3 +33,27 @@ class JobList(BaseModel):
     limit: int
     offset: int
     items: list[JobOut]
+
+
+class TargetCompanyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    company: str
+    ats: str
+    slug: str
+    hq: str | None
+    remote_policy: str | None
+    active: bool
+
+
+class TargetCompanyCreate(BaseModel):
+    company: str
+    ats: str  # greenhouse | lever | ashby
+    slug: str
+    hq: str | None = None
+    remote_policy: str | None = None
+
+
+class TargetCompanyUpdate(BaseModel):
+    active: bool

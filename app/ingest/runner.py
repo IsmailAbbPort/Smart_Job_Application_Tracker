@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.ingest import cache
 from app.ingest.base import CanonicalJob, Source
+from app.ingest.geo import resolve_country
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -89,6 +90,9 @@ def _apply_fields(job: Job, cj: CanonicalJob) -> None:
     job.title_norm = normalize_title(cj.title)
     job.location_norm = normalize_location(cj.location)
     job.dedup_key = dedup_key(cj.company, cj.title, cj.location)
+    # Derived geo: country is None when non-European/unknown.
+    job.country = resolve_country(cj.location)
+    job.is_european = job.country is not None
 
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:
@@ -139,7 +143,7 @@ def ingest_source(
         headers={"User-Agent": _USER_AGENT}, timeout=_TIMEOUT, follow_redirects=True
     )
     try:
-        jobs = source.fetch(client)
+        jobs = source.fetch(client, session)
         stats.fetched = len(jobs)
         _persist(session, name, jobs, stats)
         cache.record_fetch(session, name, status="ok", count=len(jobs))

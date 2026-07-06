@@ -37,6 +37,7 @@ class Job(Base):
         Index("ix_job_dedup_key", "dedup_key"),
         Index("ix_job_company_norm", "company_norm"),
         Index("ix_job_source", "source"),
+        Index("ix_job_is_european", "is_european"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -52,6 +53,9 @@ class Job(Base):
     company: Mapped[str] = mapped_column(Text, nullable=False)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_remote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Derived geo (best-effort from location); country is None when non-European/unknown.
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -83,3 +87,23 @@ class SourceFetch(Base):
     last_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class TargetCompany(Base):
+    """A company whose ATS board we monitor directly.
+
+    Seeded from app/ingest/target_companies.yaml but stored in the DB so the set
+    is editable at runtime (via /targets endpoints today, a UI later) without a
+    code change or redeploy.
+    """
+
+    __tablename__ = "target_company"
+    __table_args__ = (UniqueConstraint("ats", "slug", name="uq_target_ats_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    company: Mapped[str] = mapped_column(Text, nullable=False)
+    ats: Mapped[str] = mapped_column(String(16), nullable=False)  # greenhouse|lever|ashby
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    hq: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remote_policy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
