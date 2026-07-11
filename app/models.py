@@ -25,7 +25,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db import Base, EmbeddingType
+
+EMBED_DIM = 1536
 
 
 class Job(Base):
@@ -62,6 +64,9 @@ class Job(Base):
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Semantic embedding of the job (Phase 2). Null until embedded.
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType(EMBED_DIM), nullable=True)
+
     # Normalized forms (for dedup + fast filtering)
     company_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
     title_norm: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -89,6 +94,23 @@ class SourceFetch(Base):
     last_fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class Cv(Base):
+    """The user's CV: raw text + its semantic embedding (Phase 2)."""
+
+    __tablename__ = "cv"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType(EMBED_DIM), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class TargetCompany(Base):

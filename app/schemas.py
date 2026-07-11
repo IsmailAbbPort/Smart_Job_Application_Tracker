@@ -58,3 +58,29 @@ class TargetCompanyCreate(BaseModel):
 
 class TargetCompanyUpdate(BaseModel):
     active: bool
+
+
+class CvCreate(BaseModel):
+    label: str
+    content: str
+
+
+class CvOut(BaseModel):
+    id: int
+    label: str
+    embedded: bool
+    created_at: datetime
+
+
+class CvDetail(CvOut):
+    content: str
+
+
+class ShortlistItem(JobOut):
+    similarity: float
+
+
+class ShortlistResponse(BaseModel):
+    cv_id: int
+    count: int
+    items: list[ShortlistItem]

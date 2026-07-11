@@ -16,6 +16,7 @@ dependencies = [
     "pyyaml>=6.0",
     "alembic>=1.14",
     "geonamescache>=2.0",
+    "openai>=1.50",
 ]
 
 [dependency-groups]

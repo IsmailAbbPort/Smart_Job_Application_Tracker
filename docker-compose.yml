@@ -24,6 +24,9 @@ services:
       # Point at the compose db service (not localhost).
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/jobtracker
       ENVIRONMENT: development
+      # Passed through from the project-root .env (compose substitutes ${...}).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     # Migrate, seed target companies (idempotent), then serve. DB is healthy via depends_on.
     command: sh -c "alembic upgrade head && python -m app.ingest.targets && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:

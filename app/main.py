@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from app import __version__
 from app.config import get_settings
 from app.db import ping
-from app.routers import ingest, jobs, targets
+from app.routers import cv, ingest, jobs, match, targets
 
 settings = get_settings()
 
@@ -18,6 +18,8 @@ app = FastAPI(title=settings.app_name, version=__version__)
 app.include_router(jobs.router)
 app.include_router(ingest.router)
 app.include_router(targets.router)
+app.include_router(cv.router)
+app.include_router(match.router)
 
 
 @app.get("/health", tags=["ops"])
