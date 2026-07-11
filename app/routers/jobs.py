@@ -7,7 +7,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.models import Job
+from app.models import Job, SearchPreferences
+from app.prefs import get_preferences, preference_filters
 from app.schemas import JobDetail, JobList, JobOut
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -25,18 +26,14 @@ def list_jobs(
     country: str | None = Query(default=None, description="Filter by resolved country"),
     city: str | None = Query(default=None, description="Filter by resolved (canonical) city"),
     q: str | None = Query(default=None, description="Substring match on title or company"),
+    ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> JobList:
-    filters = []
+    prefs = SearchPreferences() if ignore_prefs else get_preferences(session)
+    filters = preference_filters(prefs, is_remote=is_remote, europe=europe, country=country)
     if source is not None:
         filters.append(Job.source == source)
-    if is_remote is not None:
-        filters.append(Job.is_remote == is_remote)
-    if europe is not None:
-        filters.append(Job.is_european == europe)
-    if country is not None:
-        filters.append(func.lower(Job.country) == country.lower())
     if city is not None:
         filters.append(func.lower(Job.city) == city.lower())
     if company is not None:

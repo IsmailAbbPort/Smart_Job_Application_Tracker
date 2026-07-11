@@ -84,3 +84,20 @@ class ShortlistResponse(BaseModel):
     cv_id: int
     count: int
     items: list[ShortlistItem]
+
+
+class PreferencesOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    remote_only: bool
+    require_european: bool
+    exclude_countries: list[str]
+    exclude_cities: list[str]
+    updated_at: datetime
+
+
+class PreferencesUpdate(BaseModel):
+    remote_only: bool | None = None
+    require_european: bool | None = None
+    exclude_countries: list[str] | None = None
+    exclude_cities: list[str] | None = None

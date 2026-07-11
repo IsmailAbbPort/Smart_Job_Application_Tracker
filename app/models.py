@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Index,
@@ -108,6 +109,26 @@ class Cv(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SearchPreferences(Base):
+    """Persistent default filters for the job search. Single-user -> one row (id=1).
+
+    Applied by default to /jobs and /match/shortlist so the user doesn't retype
+    filters. remote_only / require_european are positive defaults; the exclude
+    lists are a blocklist of countries/cities to drop.
+    """
+
+    __tablename__ = "search_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton, always 1
+    remote_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    require_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exclude_countries: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    exclude_cities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

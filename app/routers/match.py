@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.ai.embedder import Embedder, build_job_document, get_embedder
 from app.ai.matching import rank_jobs
 from app.db import get_session
-from app.models import Cv, Job
+from app.models import Cv, Job, SearchPreferences
+from app.prefs import get_preferences, preference_filters
 from app.schemas import JobOut, ShortlistItem, ShortlistResponse
 
 router = APIRouter(prefix="/match", tags=["match"])
@@ -46,8 +47,13 @@ def shortlist(
     is_remote: bool | None = Query(default=None),
     europe: bool | None = Query(default=None),
     country: str | None = Query(default=None),
+    ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
 ) -> ShortlistResponse:
-    """Cosine-rank embedded jobs against the CV. The cheap retrieve stage."""
+    """Cosine-rank embedded jobs against the CV. The cheap retrieve stage.
+
+    Saved search preferences (remote/europe defaults + blocklist) apply unless
+    overridden per request or bypassed with ignore_prefs.
+    """
     cv = (
         session.get(Cv, cv_id)
         if cv_id
@@ -58,13 +64,8 @@ def shortlist(
     if cv.embedding is None:
         raise HTTPException(status_code=409, detail="CV has no embedding")
 
-    filters = []
-    if is_remote is not None:
-        filters.append(Job.is_remote == is_remote)
-    if europe is not None:
-        filters.append(Job.is_european == europe)
-    if country is not None:
-        filters.append(func.lower(Job.country) == country.lower())
+    prefs = SearchPreferences() if ignore_prefs else get_preferences(session)
+    filters = preference_filters(prefs, is_remote=is_remote, europe=europe, country=country)
 
     ranked = rank_jobs(session, list(cv.embedding), filters=filters, limit=limit)
     items = [
