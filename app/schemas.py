@@ -65,6 +65,14 @@ class CvCreate(BaseModel):
     content: str
 
 
+class CvUpload(BaseModel):
+    """A CV uploaded as a file (PDF or text), base64-encoded by the browser."""
+
+    label: str
+    filename: str
+    content_base64: str
+
+
 class CvOut(BaseModel):
     id: int
     label: str
