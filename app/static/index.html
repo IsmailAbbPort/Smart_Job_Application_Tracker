@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Job Shortlist</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --panel-2: #1e2230;
+      --border: #2a2f3d;
+      --text: #e6e8ee;
+      --muted: #9aa3b2;
+      --accent: #6ea8fe;
+      --good: #4ade80;
+      --warn: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { margin: 0; font-size: 20px; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    main { max-width: 920px; margin: 0 auto; padding: 24px; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .controls.upload { margin-bottom: 12px; }
+    input[type="file"] { color: var(--muted); font: inherit; }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 12px; color: var(--muted); }
+    select, input[type="text"], input[type="number"] {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+      min-width: 120px;
+    }
+    .check { flex-direction: row; align-items: center; gap: 6px; }
+    .check label { font-size: 13px; color: var(--text); }
+    button {
+      background: var(--accent);
+      color: #0b1020;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 16px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
+    .status.error { color: #f87171; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+    }
+    .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .card a.title { color: var(--text); font-weight: 600; font-size: 16px; text-decoration: none; }
+    .card a.title:hover { color: var(--accent); }
+    .card .company { color: var(--muted); margin-top: 2px; }
+    .score {
+      flex: none;
+      text-align: right;
+    }
+    .score .num { font-weight: 700; font-size: 18px; color: var(--accent); }
+    .score .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .meter { height: 6px; border-radius: 4px; background: var(--panel-2); margin-top: 10px; overflow: hidden; }
+    .meter > span { display: block; height: 100%; background: linear-gradient(90deg, var(--warn), var(--good)); }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .badge {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--panel-2);
+    }
+    .badge.remote { color: var(--good); border-color: #2f5b3f; }
+    .badge.eu { color: var(--accent); border-color: #2f4a6b; }
+    .badge.warn { color: var(--warn); border-color: #6b5a2f; }
+    .badge.good { color: var(--good); border-color: #2f5b3f; }
+    .badge.bad { color: #f87171; border-color: #6b2f2f; }
+    .assess { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .status-sel { min-width: 130px; }
+    .pipeline { color: var(--muted); font-size: 13px; margin: 4px 0 12px; min-height: 18px; }
+    .assess-btn {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .verdict { margin-top: 10px; font-size: 14px; flex-basis: 100%; }
+    .verdict .headline { display: flex; align-items: center; gap: 8px; }
+    .verdict .tier {
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+    }
+    .verdict .tier.strong { color: var(--good); border-color: #2f5b3f; }
+    .verdict .tier.medium { color: var(--warn); border-color: #6b5a2f; }
+    .verdict .tier.weak { color: #f87171; border-color: #6b2f2f; }
+    .verdict .dims { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .verdict ul { margin: 8px 0 0; padding-left: 18px; }
+    .verdict .gap { color: var(--warn); }
+    .verdict.err { color: #f87171; }
+    footer { color: var(--muted); font-size: 12px; text-align: center; padding: 24px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Job Shortlist</h1>
+    <p>Cosine-ranked matches for your CV. Data comes from the running API.</p>
+  </header>
+
+  <main>
+    <form class="controls upload" id="upload">
+      <div class="field" style="flex: 1 1 240px">
+        <label for="cvfile">Upload a new CV (PDF or .txt)</label>
+        <input type="file" id="cvfile" accept=".pdf,.txt,text/plain,application/pdf" />
+      </div>
+      <div class="field" style="flex: 1 1 180px">
+        <label for="cvlabel">Label</label>
+        <input type="text" id="cvlabel" placeholder="e.g. CV 2026-07" />
+      </div>
+      <button type="submit" id="upbtn">Upload &amp; embed</button>
+    </form>
+
+    <form class="controls" id="controls">
+      <div class="field">
+        <label for="cv">CV</label>
+        <select id="cv"><option>loading...</option></select>
+      </div>
+      <div class="field">
+        <label for="limit">Results</label>
+        <input type="number" id="limit" value="25" min="1" max="100" />
+      </div>
+      <div class="field">
+        <label for="cities">Cities (comma-separated)</label>
+        <input type="text" id="cities" placeholder="e.g. Berlin, Paris" style="min-width: 260px" />
+      </div>
+      <div class="field">
+        <label for="country">Country (opt.)</label>
+        <input type="text" id="country" placeholder="e.g. Germany" />
+      </div>
+      <div class="field">
+        <label for="language">Language (opt.)</label>
+        <input type="text" id="language" placeholder="e.g. en" style="min-width: 90px" />
+      </div>
+      <div class="field">
+        <label for="max_age">Posted within (days)</label>
+        <input type="number" id="max_age" min="1" placeholder="any" style="min-width: 90px" />
+      </div>
+      <div class="field">
+        <label for="min_salary">Min salary</label>
+        <input type="number" id="min_salary" min="1" step="1000" placeholder="any" style="min-width: 100px" />
+      </div>
+      <div class="field">
+        <label for="remote">Remote</label>
+        <select id="remote">
+          <option value="">Any</option>
+          <option value="true">Remote only</option>
+          <option value="false">Not remote</option>
+        </select>
+      </div>
+      <div class="field check">
+        <input type="checkbox" id="europe" />
+        <label for="europe">Europe only</label>
+      </div>
+      <div class="field check">
+        <input type="checkbox" id="ignore_prefs" />
+        <label for="ignore_prefs">Ignore saved prefs</label>
+      </div>
+      <button type="submit" id="go">Shortlist</button>
+    </form>
+
+    <div class="status" id="status"></div>
+    <div class="pipeline" id="pipeline"></div>
+    <div id="results"></div>
+  </main>
+
+  <footer>Smart Job Application Tracker</footer>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status");
+    const resultsEl = $("results");
+    const STATUSES = ["saved", "applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn"];
+    const EFFORT_LABELS = { cover_letter: "cover letter", coding_challenge: "coding challenge", portfolio: "portfolio" };
+
+    function fmtSalary(job) {
+      if (!job.salary_max && !job.salary_min) return null;
+      const sym = { USD: "$", EUR: "€", GBP: "£" }[job.salary_currency] ||
+        (job.salary_currency ? job.salary_currency + " " : "");
+      const k = (n) => Math.round(n / 1000) + "k";
+      if (job.salary_min && job.salary_max && job.salary_min !== job.salary_max)
+        return `${sym}${k(job.salary_min)}-${k(job.salary_max)}`;
+      return `${sym}${k(job.salary_max || job.salary_min)}`;
+    }
+
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.classList.toggle("error", isError);
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return null;
+      const d = new Date(iso);
+      if (isNaN(d)) return null;
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+
+    async function loadCvs() {
+      try {
+        const res = await fetch("/cv");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const cvs = await res.json();
+        const sel = $("cv");
+        if (!cvs.length) {
+          sel.innerHTML = '<option value="">no CV found - POST /cv first</option>';
+          return;
+        }
+        sel.innerHTML = cvs
+          .map((c) => `<option value="${c.id}">${c.label}${c.embedded ? "" : " (no embedding)"}</option>`)
+          .join("");
+        // Honor cv_id from the URL if present; otherwise the newest CV stays selected.
+        const wantCv = new URLSearchParams(location.search).get("cv_id");
+        if (wantCv && cvs.some((c) => String(c.id) === wantCv)) sel.value = wantCv;
+      } catch (e) {
+        $("cv").innerHTML = '<option value="">failed to load CVs</option>';
+        setStatus("Could not load CVs: " + e.message, true);
+      }
+    }
+
+    function locationText(job) {
+      return job.city || job.country || job.location || "Location not specified";
+    }
+
+    function renderResults(data) {
+      if (!data.items.length) {
+        resultsEl.innerHTML = "";
+        setStatus("No matches for these filters.");
+        return;
+      }
+      setStatus(`${data.count} result${data.count === 1 ? "" : "s"} for CV #${data.cv_id}.`);
+      resultsEl.innerHTML = data.items
+        .map((job) => {
+          const pct = Math.max(0, Math.min(100, Math.round(job.similarity * 100)));
+          const posted = fmtDate(job.posted_at);
+          const badges = [];
+          if (job.is_remote) badges.push('<span class="badge remote">Remote</span>');
+          if (job.is_european) badges.push('<span class="badge eu">Europe</span>');
+          if (job.language) badges.push(`<span class="badge">${esc(job.language.toUpperCase())}</span>`);
+          if (job.required_languages && job.required_languages.length)
+            badges.push(`<span class="badge warn">needs ${esc(job.required_languages.join(", "))}</span>`);
+          if (job.visa_sponsorship === true) badges.push('<span class="badge good">sponsors visa</span>');
+          if (job.visa_sponsorship === false) badges.push('<span class="badge bad">no sponsorship</span>');
+          if (job.remote_region) badges.push(`<span class="badge warn">${esc(job.remote_region.toUpperCase())}-only</span>`);
+          if (typeof job.timezone_overlap_hours === "number") {
+            const tzCls = job.timezone_overlap_hours >= 4 ? "good" : "bad";
+            badges.push(`<span class="badge ${tzCls}">TZ ${job.timezone_overlap_hours}h</span>`);
+          }
+          const salary = fmtSalary(job);
+          if (salary) badges.push(`<span class="badge good">${esc(salary)}</span>`);
+          (job.effort_signals || []).forEach((e) =>
+            badges.push(`<span class="badge warn">${esc(EFFORT_LABELS[e] || e)}</span>`)
+          );
+          badges.push(`<span class="badge">${job.source}</span>`);
+          if (posted) badges.push(`<span class="badge">Posted ${posted}</span>`);
+          return `
+            <div class="card">
+              <div class="top">
+                <div>
+                  <a class="title" href="${job.url}" target="_blank" rel="noopener">${job.title}</a>
+                  <div class="company">${job.company} &middot; ${locationText(job)}</div>
+                </div>
+                <div class="score">
+                  <div class="num">${pct}%</div>
+                  <div class="lbl">match</div>
+                </div>
+              </div>
+              <div class="meter"><span style="width:${pct}%"></span></div>
+              <div class="badges">${badges.join("")}</div>
+              <div class="assess">
+                <select class="status-sel" data-job="${job.id}" title="Pipeline status">
+                  <option value="">Not tracked</option>
+                  ${STATUSES.map((st) => `<option value="${st}"${job.application_status === st ? " selected" : ""}>${st}</option>`).join("")}
+                </select>
+                <button class="assess-btn" data-job="${job.id}">Assess fit (AI judge)</button>
+                <div class="verdict" id="verdict-${job.id}"></div>
+              </div>
+            </div>`;
+        })
+        .join("");
+    }
+
+    // Preload the form from URL query params so a link is shareable/bookmarkable.
+    function applyUrlToForm() {
+      const q = new URLSearchParams(location.search);
+      if (q.has("limit")) $("limit").value = q.get("limit");
+      if (q.has("cities")) $("cities").value = q.getAll("cities").join(",");
+      if (q.has("country")) $("country").value = q.get("country");
+      if (q.has("language")) $("language").value = q.get("language");
+      if (q.has("max_age_days")) $("max_age").value = q.get("max_age_days");
+      if (q.has("min_salary")) $("min_salary").value = q.get("min_salary");
+      if (q.has("is_remote")) $("remote").value = q.get("is_remote");
+      if (q.get("europe") === "true") $("europe").checked = true;
+      if (q.get("ignore_prefs") === "true") $("ignore_prefs").checked = true;
+    }
+
+    function buildParams() {
+      const params = new URLSearchParams();
+      const cvId = $("cv").value;
+      if (cvId) params.set("cv_id", cvId);
+      params.set("limit", $("limit").value || "25");
+      if ($("remote").value) params.set("is_remote", $("remote").value);
+      if ($("europe").checked) params.set("europe", "true");
+      if ($("ignore_prefs").checked) params.set("ignore_prefs", "true");
+      const country = $("country").value.trim();
+      if (country) params.set("country", country);
+      const language = $("language").value.trim();
+      if (language) params.set("language", language);
+      const maxAge = $("max_age").value.trim();
+      if (maxAge) params.set("max_age_days", maxAge);
+      const minSalary = $("min_salary").value.trim();
+      if (minSalary) params.set("min_salary", minSalary);
+      const cities = $("cities").value
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+      cities.forEach((c) => params.append("cities", c));
+      return params;
+    }
+
+    async function runShortlist(ev) {
+      if (ev) ev.preventDefault();
+      const params = buildParams();
+      // Reflect the current filters in the address bar (without cv_id noise stays fine).
+      history.replaceState(null, "", "/?" + params.toString());
+
+      $("go").disabled = true;
+      setStatus("Loading shortlist...");
+      resultsEl.innerHTML = "";
+      try {
+        const res = await fetch("/match/shortlist?" + params.toString());
+        if (!res.ok) {
+          let detail = "HTTP " + res.status;
+          try { detail = (await res.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        renderResults(await res.json());
+      } catch (e) {
+        setStatus("Shortlist failed: " + e.message, true);
+      } finally {
+        $("go").disabled = false;
+      }
+    }
+
+    // Read a File as base64 (strip the "data:...;base64," prefix the browser adds).
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("could not read file"));
+        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadCv(ev) {
+      ev.preventDefault();
+      const file = $("cvfile").files[0];
+      if (!file) {
+        setStatus("Pick a CV file first.", true);
+        return;
+      }
+      const label = $("cvlabel").value.trim() || file.name;
+      $("upbtn").disabled = true;
+      setStatus("Uploading and embedding CV...");
+      try {
+        const content_base64 = await fileToBase64(file);
+        const res = await fetch("/cv/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label, filename: file.name, content_base64 }),
+        });
+        if (!res.ok) {
+          let detail = "HTTP " + res.status;
+          try { detail = (await res.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        const cv = await res.json();
+        $("cvfile").value = "";
+        $("cvlabel").value = "";
+        // Reload the CV list, select the one we just made, and re-run the shortlist.
+        await loadCvs();
+        $("cv").value = String(cv.id);
+        setStatus(`Uploaded "${cv.label}" (CV #${cv.id}). Ranking...`);
+        runShortlist();
+      } catch (e) {
+        setStatus("Upload failed: " + e.message, true);
+      } finally {
+        $("upbtn").disabled = false;
+      }
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+      );
+    }
+
+    function renderVerdict(el, v) {
+      const d = v.dimension_scores || {};
+      const matched = (v.matched_requirements || [])
+        .map((m) => `<li>${esc(m.requirement)} <span style="color:var(--muted)">- ${esc(m.cv_evidence)}</span></li>`)
+        .join("");
+      const gaps = (v.gaps || []).map((g) => `<li class="gap">${esc(g)}</li>`).join("");
+      el.className = "verdict";
+      el.innerHTML = `
+        <div class="headline">
+          <span class="tier ${esc(v.verdict)}">${esc(v.verdict)}</span>
+          <strong>${v.overall_score}/100</strong>
+          <span>${esc(v.one_line_verdict)}</span>
+        </div>
+        <div class="dims">skills ${d.skills} &middot; seniority ${d.seniority} &middot; domain ${d.domain} &middot; location/remote ${d.location_remote}</div>
+        ${matched ? `<div>Matched:</div><ul>${matched}</ul>` : ""}
+        ${gaps ? `<div>Gaps:</div><ul>${gaps}</ul>` : ""}`;
+    }
+
+    async function assess(btn) {
+      const jobId = btn.dataset.job;
+      const el = $(`verdict-${jobId}`);
+      const cvId = $("cv").value;
+      btn.disabled = true;
+      el.className = "verdict";
+      el.textContent = "Asking the judge...";
+      try {
+        const q = cvId ? `?cv_id=${cvId}` : "";
+        const res = await fetch(`/match/${jobId}${q}`, { method: "POST" });
+        if (!res.ok) {
+          let detail = "HTTP " + res.status;
+          try { detail = (await res.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        renderVerdict(el, await res.json());
+      } catch (e) {
+        el.className = "verdict err";
+        el.textContent = "Judge unavailable: " + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    resultsEl.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".assess-btn");
+      if (btn) assess(btn);
+    });
+
+    async function refreshStats() {
+      try {
+        const s = await (await fetch("/applications/stats")).json();
+        const parts = Object.entries(s.by_status)
+          .filter(([, n]) => n > 0)
+          .map(([k, n]) => `${k}: ${n}`);
+        $("pipeline").textContent = s.total ? "Pipeline - " + parts.join("  ·  ") : "";
+      } catch {}
+    }
+
+    async function trackStatus(sel) {
+      const jobId = sel.dataset.job;
+      const status = sel.value;
+      try {
+        if (!status) {
+          await fetch(`/applications/${jobId}`, { method: "DELETE" });
+        } else {
+          const res = await fetch("/applications", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_id: Number(jobId), status }),
+          });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+        }
+        refreshStats();
+      } catch (e) {
+        setStatus("Could not update status: " + e.message, true);
+      }
+    }
+
+    resultsEl.addEventListener("change", (ev) => {
+      const sel = ev.target.closest(".status-sel");
+      if (sel) trackStatus(sel);
+    });
+
+    $("upload").addEventListener("submit", uploadCv);
+    $("controls").addEventListener("submit", runShortlist);
+    applyUrlToForm();
+    loadCvs().then(runShortlist);
+    refreshStats();
+  </script>
+</body>
+</html>
