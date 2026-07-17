@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.ingest.runner import SOURCES, ingest_all, ingest_source
+from app.ingest.runner import SOURCES, backfill_enrichment, ingest_all, ingest_source
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -19,6 +19,16 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 def list_sources() -> dict:
     """List registered sources and their throttle TTLs."""
     return {name: {"ttl_seconds": src.ttl_seconds} for name, src in SOURCES.items()}
+
+
+@router.post("/backfill")
+def trigger_backfill(
+    session: Session = Depends(get_session),
+    force: bool = Query(default=False, description="Recompute for all jobs, not just missing ones"),
+    limit: int = Query(default=5000, ge=1, le=20000, description="Max jobs to process this call"),
+) -> dict:
+    """Recompute derived signals (language + eligibility) for pre-existing jobs."""
+    return backfill_enrichment(session, limit=limit, force=force)
 
 
 @router.post("/{source}")

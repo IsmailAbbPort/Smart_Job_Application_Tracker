@@ -17,6 +17,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -61,6 +62,22 @@ class Job(Base):
     city: Mapped[str | None] = mapped_column(Text, nullable=True)
     country: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Language the posting is written in (ISO 639-1), null if too short to detect.
+    # required_languages: spoken languages the text explicitly demands (best-effort).
+    language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    required_languages: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Eligibility signals (see app/ingest/eligibility.py): can the user take this?
+    # visa_sponsorship: True offered / False refused / None unstated.
+    # remote_region: region a remote role is locked to (us/eu/uk/...), null if open.
+    # required_utc_offsets: timezone offsets the working hours demand (may be empty).
+    visa_sponsorship: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    remote_region: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    required_utc_offsets: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Compensation (best-effort, currency-anchored) + application effort signals.
+    salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    salary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    effort_signals: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -114,6 +131,41 @@ class Cv(Base):
     )
 
 
+class Match(Base):
+    """The LLM judge's verdict for one (CV, job) pair (Phase 3, rerank stage).
+
+    One row per CV+job. The structured sub-parts (dimension scores, matched
+    requirements, gaps) are stored as JSON so the whole explainable verdict round-
+    trips without extra tables. Re-judging overwrites the row (see the router).
+    """
+
+    __tablename__ = "match"
+    __table_args__ = (UniqueConstraint("cv_id", "job_id", name="uq_match_cv_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cv_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("cv.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("job.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    overall_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)  # strong|medium|weak
+    one_line_verdict: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    dimension_scores: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    matched_requirements: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    gaps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SearchPreferences(Base):
     """Persistent default filters for the job search. Single-user -> one row (id=1).
 
@@ -129,6 +181,51 @@ class SearchPreferences(Base):
     require_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exclude_countries: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     exclude_cities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # ISO 639-1 codes the user can work in; jobs written in another language are
+    # dropped from results when this is non-empty (empty = no language filtering).
+    known_languages: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Hard freshness cutoff: drop postings older than this many days (null = off).
+    # Jobs with no post date are kept. Distinct from the soft recency decay.
+    max_age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Eligibility preferences. require_sponsorship: drop jobs that explicitly refuse
+    # visa sponsorship. exclude_remote_regions: region locks to reject (e.g. ["us"]).
+    # user_utc_offset + min_timezone_overlap_hours: drop jobs whose working-hours
+    # timezone overlaps the user's by fewer than N hours (both must be set).
+    require_sponsorship: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    exclude_remote_regions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    user_utc_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_timezone_overlap_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Drop jobs whose stated max pay is below this (currency-naive; null-pay kept).
+    min_salary: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Application(Base):
+    """A tracked application to one job posting (the pipeline).
+
+    One row per job (single user), keyed for lookup by job_id. status walks the
+    pipeline (saved -> applied -> screening -> ... -> offer/rejected); applied_at is
+    stamped when it first leaves 'saved'. cv_id records which CV version was sent.
+    """
+
+    __tablename__ = "application"
+    __table_args__ = (UniqueConstraint("job_id", name="uq_application_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("job.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    cv_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("cv.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="saved")
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

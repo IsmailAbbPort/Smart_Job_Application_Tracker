@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.models import Cv, Job
 
 
-def _job(source_id, *, embedding=None, is_remote=True, is_european=True) -> Job:
+def _job(source_id, *, embedding=None, is_remote=True, is_european=True, posted_at=None) -> Job:
     return Job(
         source="test",
         source_id=source_id,
@@ -17,6 +17,7 @@ def _job(source_id, *, embedding=None, is_remote=True, is_european=True) -> Job:
         is_remote=is_remote,
         is_european=is_european,
         embedding=embedding,
+        posted_at=posted_at,
     )
 
 
@@ -67,6 +68,48 @@ def test_shortlist_europe_filter(client, session_factory):
 
 def test_shortlist_no_cv_404(client):
     assert client.get("/match/shortlist").status_code == 404
+
+
+def test_shortlist_recency_breaks_fit_ties(client, session_factory):
+    now = datetime.now(UTC)
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))
+        # Identical (perfect) fit; only the post date differs.
+        s.add(_job("fresh", embedding=[1.0, 0.0, 0.0], posted_at=now))
+        s.add(_job("stale", embedding=[1.0, 0.0, 0.0], posted_at=now - timedelta(days=120)))
+        s.commit()
+    items = client.get("/match/shortlist").json()["items"]
+    ids = [i["source_id"] for i in items]
+    assert ids == ["fresh", "stale"]  # equal fit -> fresher first
+    assert items[0]["recency_weight"] == 1.0
+    assert items[1]["recency_weight"] < 1.0  # stale one was down-weighted
+
+
+def test_shortlist_recency_does_not_bury_better_fit(client, session_factory):
+    now = datetime.now(UTC)
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))
+        # Clearly better fit but old, vs weaker fit but fresh: fit should still win.
+        s.add(_job("old_strong", embedding=[1.0, 0.0, 0.0], posted_at=now - timedelta(days=120)))
+        s.add(_job("new_weak", embedding=[0.3, 0.95, 0.0], posted_at=now))
+        s.commit()
+    ids = [i["source_id"] for i in client.get("/match/shortlist").json()["items"]]
+    assert ids[0] == "old_strong"  # the floored decay can't overturn a big fit gap
+
+
+def test_shortlist_max_age_cutoff(client, session_factory):
+    now = datetime.now(UTC)
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))
+        s.add(_job("recent", embedding=[1.0, 0.0, 0.0], posted_at=now - timedelta(days=10)))
+        s.add(_job("old", embedding=[1.0, 0.0, 0.0], posted_at=now - timedelta(days=90)))
+        s.add(_job("undated", embedding=[1.0, 0.0, 0.0], posted_at=None))
+        s.commit()
+    ids = {
+        i["source_id"]
+        for i in client.get("/match/shortlist", params={"max_age_days": 45}).json()["items"]
+    }
+    assert ids == {"recent", "undated"}  # old dropped; undated kept (unknown != old)
 
 
 def test_shortlist_uses_latest_cv(client, session_factory):

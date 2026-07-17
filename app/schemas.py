@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobOut(BaseModel):
@@ -20,9 +21,20 @@ class JobOut(BaseModel):
     country: str | None
     is_remote: bool
     is_european: bool
+    language: str | None = None
+    required_languages: list[str] = Field(default_factory=list)
+    visa_sponsorship: bool | None = None
+    remote_region: str | None = None
+    required_utc_offsets: list[int] = Field(default_factory=list)
+    salary_min: int | None = None
+    salary_max: int | None = None
+    salary_currency: str | None = None
+    effort_signals: list[str] = Field(default_factory=list)
     url: str
     posted_at: datetime | None
     ingested_at: datetime
+    # Pipeline status if this job is being tracked (set by list/shortlist routes).
+    application_status: str | None = None
 
 
 class JobDetail(JobOut):
@@ -85,13 +97,106 @@ class CvDetail(CvOut):
 
 
 class ShortlistItem(JobOut):
-    similarity: float
+    similarity: float  # raw cosine fit, before the recency adjustment
+    recency_weight: float = 1.0  # freshness multiplier applied for ordering
+    timezone_overlap_hours: int | None = None  # working-hours overlap vs the user
 
 
 class ShortlistResponse(BaseModel):
     cv_id: int
     count: int
     items: list[ShortlistItem]
+
+
+# --- Match judge (Phase 3): the LLM rerank verdict over a shortlisted job ---
+
+
+class MatchTier(StrEnum):
+    """Coarse fit label, alongside the numeric score."""
+
+    strong = "strong"
+    medium = "medium"
+    weak = "weak"
+
+
+class DimensionScores(BaseModel):
+    """0-100 sub-scores. The overall score is not a mechanical average of these;
+    it is the judge's holistic call, but these show where the fit comes from."""
+
+    skills: int = Field(ge=0, le=100, description="Technical/skills overlap with the role")
+    seniority: int = Field(ge=0, le=100, description="Experience level vs what the role expects")
+    domain: int = Field(ge=0, le=100, description="Industry/domain relevance")
+    location_remote: int = Field(ge=0, le=100, description="Location / remote-eligibility fit")
+
+
+class MatchedRequirement(BaseModel):
+    """One job requirement the CV satisfies, with the receipt."""
+
+    requirement: str = Field(description="A requirement stated in the job posting")
+    cv_evidence: str = Field(description="The line/phrase from the CV that supports it")
+
+
+class MatchVerdict(BaseModel):
+    """The judge's structured, evidence-grounded verdict for one (CV, job) pair.
+
+    Doubles as the tool-use input schema sent to Claude, so scores are always
+    parseable and every match cites the CV line that supports it.
+    """
+
+    overall_score: int = Field(ge=0, le=100, description="Holistic fit, 0-100")
+    verdict: MatchTier
+    one_line_verdict: str = Field(description="A single sentence summarizing the fit")
+    dimension_scores: DimensionScores
+    matched_requirements: list[MatchedRequirement] = Field(
+        description="Requirements the CV meets, each with its CV evidence line"
+    )
+    gaps: list[str] = Field(description="Requirements the CV does not evidence")
+
+
+class MatchOut(MatchVerdict):
+    """A stored/just-computed verdict, plus provenance for the API response."""
+
+    job_id: int
+    cv_id: int
+    model: str
+    created_at: datetime
+
+
+# --- Application pipeline tracking ---
+
+
+class ApplicationStatus(StrEnum):
+    saved = "saved"
+    applied = "applied"
+    screening = "screening"
+    interview = "interview"
+    offer = "offer"
+    rejected = "rejected"
+    ghosted = "ghosted"
+    withdrawn = "withdrawn"
+
+
+class ApplicationUpsert(BaseModel):
+    """Create-or-update a tracked application (keyed by job_id)."""
+
+    job_id: int
+    status: ApplicationStatus = ApplicationStatus.saved
+    cv_id: int | None = None
+    notes: str | None = None
+
+
+class ApplicationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    cv_id: int | None
+    status: ApplicationStatus
+    notes: str
+    applied_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    job: JobOut
 
 
 class PreferencesOut(BaseModel):
@@ -101,6 +206,13 @@ class PreferencesOut(BaseModel):
     require_european: bool
     exclude_countries: list[str]
     exclude_cities: list[str]
+    known_languages: list[str]
+    max_age_days: int | None
+    require_sponsorship: bool
+    exclude_remote_regions: list[str]
+    user_utc_offset: int | None
+    min_timezone_overlap_hours: int | None
+    min_salary: int | None
     updated_at: datetime
 
 
@@ -109,3 +221,10 @@ class PreferencesUpdate(BaseModel):
     require_european: bool | None = None
     exclude_countries: list[str] | None = None
     exclude_cities: list[str] | None = None
+    known_languages: list[str] | None = None
+    max_age_days: int | None = None
+    require_sponsorship: bool | None = None
+    exclude_remote_regions: list[str] | None = None
+    user_utc_offset: int | None = None
+    min_timezone_overlap_hours: int | None = None
+    min_salary: int | None = None

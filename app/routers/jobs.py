@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.applications import annotate_application_status
 from app.db import get_session
 from app.models import Job, SearchPreferences
 from app.prefs import get_preferences, preference_filters
@@ -25,13 +26,30 @@ def list_jobs(
     ),
     country: str | None = Query(default=None, description="Filter by resolved country"),
     city: str | None = Query(default=None, description="Filter by resolved (canonical) city"),
+    language: str | None = Query(
+        default=None, description="Filter by posting language (ISO, e.g. en)"
+    ),
+    max_age_days: int | None = Query(
+        default=None, ge=1, description="Drop postings older than this many days"
+    ),
+    min_salary: int | None = Query(
+        default=None, ge=1, description="Drop jobs whose stated max pay is below this"
+    ),
     q: str | None = Query(default=None, description="Substring match on title or company"),
     ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> JobList:
     prefs = SearchPreferences() if ignore_prefs else get_preferences(session)
-    filters = preference_filters(prefs, is_remote=is_remote, europe=europe, country=country)
+    filters = preference_filters(
+        prefs,
+        is_remote=is_remote,
+        europe=europe,
+        country=country,
+        language=language,
+        max_age_days=max_age_days,
+        min_salary=min_salary,
+    )
     if source is not None:
         filters.append(Job.source == source)
     if city is not None:
@@ -50,12 +68,9 @@ def list_jobs(
         .limit(limit)
         .offset(offset)
     ).all()
-    return JobList(
-        total=total,
-        limit=limit,
-        offset=offset,
-        items=[JobOut.model_validate(r) for r in rows],
-    )
+    items = [JobOut.model_validate(r) for r in rows]
+    annotate_application_status(session, items)
+    return JobList(total=total, limit=limit, offset=offset, items=items)
 
 
 @router.get("/{job_id}", response_model=JobDetail)

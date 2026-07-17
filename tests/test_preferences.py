@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from app.models import Cv, Job
 
 
-def _job(sid, *, country=None, city=None, is_remote=True, is_european=True, embedding=None) -> Job:
+def _job(
+    sid,
+    *,
+    country=None,
+    city=None,
+    is_remote=True,
+    is_european=True,
+    embedding=None,
+    posted_at=None,
+) -> Job:
     return Job(
         source="test",
         source_id=sid,
@@ -17,6 +28,7 @@ def _job(sid, *, country=None, city=None, is_remote=True, is_european=True, embe
         country=country,
         city=city,
         embedding=embedding,
+        posted_at=posted_at,
     )
 
 
@@ -78,6 +90,28 @@ def test_jobs_country_and_city_blocklist(client, session_factory):
 
     ids = {i["source_id"] for i in client.get("/jobs").json()["items"]}
     assert ids == {"de", "nocountry"}  # US excluded by country, London by city; null kept
+
+
+def test_max_age_days_default_and_clear(client, session_factory):
+    now = datetime.now(UTC)
+    with session_factory() as s:
+        s.add_all(
+            [
+                _job("new", posted_at=now - timedelta(days=5)),
+                _job("old", posted_at=now - timedelta(days=200)),
+                _job("undated", posted_at=None),
+            ]
+        )
+        s.commit()
+    client.put("/preferences", json={"max_age_days": 30})
+    ids = {i["source_id"] for i in client.get("/jobs").json()["items"]}
+    assert ids == {"new", "undated"}  # old dropped, null-dated kept
+
+    # A non-positive value clears the cutoff.
+    body = client.put("/preferences", json={"max_age_days": 0}).json()
+    assert body["max_age_days"] is None
+    ids_all = {i["source_id"] for i in client.get("/jobs").json()["items"]}
+    assert ids_all == {"new", "old", "undated"}
 
 
 def test_explicit_param_overrides_pref(client, session_factory):

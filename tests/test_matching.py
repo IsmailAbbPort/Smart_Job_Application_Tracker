@@ -3,9 +3,32 @@
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime, timedelta
 
-from app.ai.matching import cosine_similarity, rank_jobs
+from app.ai.matching import cosine_similarity, rank_jobs, recency_weight
 from app.models import Job
+
+_NOW = datetime(2026, 7, 17, tzinfo=UTC)
+
+
+def test_recency_weight():
+    # Fresh, future, and unknown dates are all neutral (1.0).
+    assert recency_weight(_NOW, _NOW, half_life_days=30, floor=0.5) == 1.0
+    assert recency_weight(None, _NOW, half_life_days=30, floor=0.5) == 1.0
+    assert recency_weight(_NOW + timedelta(days=5), _NOW, half_life_days=30, floor=0.5) == 1.0
+    # One half-life old -> halved (no floor in the way).
+    one_hl = recency_weight(_NOW - timedelta(days=30), _NOW, half_life_days=30, floor=0.1)
+    assert math.isclose(one_hl, 0.5, abs_tol=1e-9)
+    # Very old is clamped to the floor, never below.
+    assert recency_weight(_NOW - timedelta(days=999), _NOW, half_life_days=30, floor=0.85) == 0.85
+
+
+def test_recency_weight_handles_naive_datetime():
+    # SQLite returns naive datetimes; they are assumed UTC, not rejected.
+    naive = (_NOW - timedelta(days=30)).replace(tzinfo=None)
+    assert math.isclose(
+        recency_weight(naive, _NOW, half_life_days=30, floor=0.1), 0.5, abs_tol=1e-9
+    )
 
 
 def test_cosine_similarity():

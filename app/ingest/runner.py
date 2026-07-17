@@ -14,12 +14,19 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.ingest import cache
 from app.ingest.base import CanonicalJob, Source
+from app.ingest.compensation import extract_effort_signals, extract_salary
+from app.ingest.eligibility import (
+    detect_remote_region,
+    detect_visa_sponsorship,
+    extract_required_utc_offsets,
+)
 from app.ingest.geo import is_european, resolve_city, resolve_country
+from app.ingest.language import detect_language, extract_required_languages
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -95,6 +102,22 @@ def _apply_fields(job: Job, cj: CanonicalJob) -> None:
     job.city = resolve_city(cj.location)
     job.country = resolve_country(cj.location)
     job.is_european = is_european(cj.location)
+    _apply_derived(job)
+
+
+def _apply_derived(job: Job) -> None:
+    """Set language + eligibility signals from a job's own text (title/description).
+
+    Shared by ingest and backfill so both stay in sync. Reads from the ORM row so
+    it works whether fields were just copied from a CanonicalJob or loaded from DB.
+    """
+    job.language = detect_language(job.title, job.description)
+    job.required_languages = extract_required_languages(job.description)
+    job.visa_sponsorship = detect_visa_sponsorship(job.description)
+    job.remote_region = detect_remote_region(job.description, is_remote=job.is_remote)
+    job.required_utc_offsets = extract_required_utc_offsets(job.description)
+    job.salary_min, job.salary_max, job.salary_currency = extract_salary(job.description)
+    job.effort_signals = extract_effort_signals(job.description)
 
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:
@@ -159,6 +182,24 @@ def ingest_source(
         if owns_client:
             client.close()
     return stats
+
+
+def backfill_enrichment(session: Session, *, limit: int = 5000, force: bool = False) -> dict:
+    """Recompute derived signals (language + eligibility) for pre-existing jobs.
+
+    Idempotent: processes only rows without a language unless force re-does all
+    (language is the proxy for "not yet enriched"). Rows too short to detect a
+    language stay null - expected, not an error - so `remaining` may not reach zero.
+    """
+    stmt = select(Job)
+    if not force:
+        stmt = stmt.where(Job.language.is_(None))
+    jobs = session.scalars(stmt.limit(limit)).all()
+    for job in jobs:
+        _apply_derived(job)
+    session.commit()
+    remaining = session.scalar(select(func.count()).select_from(Job).where(Job.language.is_(None)))
+    return {"processed": len(jobs), "remaining_undetected": remaining or 0}
 
 
 def ingest_all(session: Session, *, force: bool = False) -> IngestSummary:

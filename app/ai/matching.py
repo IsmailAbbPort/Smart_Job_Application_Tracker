@@ -8,12 +8,35 @@ cosine similarity in Python, so ranking is testable without pgvector.
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import Job
+
+
+def recency_weight(
+    posted_at: datetime | None,
+    now: datetime,
+    *,
+    half_life_days: float,
+    floor: float,
+) -> float:
+    """Freshness multiplier in [floor, 1.0]: 1.0 when fresh, halving every
+    half_life_days, never below floor. A missing/future date -> 1.0 (neutral), so
+    jobs are never penalized for absent metadata (same spirit as null-kept filters).
+    """
+    if posted_at is None:
+        return 1.0
+    # SQLite round-trips tz-aware columns as naive; assume UTC so the math is valid.
+    if posted_at.tzinfo is None:
+        posted_at = posted_at.replace(tzinfo=UTC)
+    age_days = (now - posted_at).total_seconds() / 86400.0
+    if age_days <= 0:
+        return 1.0
+    return max(floor, 0.5 ** (age_days / half_life_days))
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:

@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 - register tables on Base.metadata
 from app.ai.embedder import FakeEmbedder, get_embedder
+from app.ai.judge import FakeJudge, get_judge
 from app.db import Base, get_session
 from app.ingest.base import CanonicalJob
 from app.main import app as fastapi_app
@@ -125,6 +126,21 @@ def embed_client(session_factory) -> Iterator[TestClient]:
 
     fastapi_app.dependency_overrides[get_session] = override
     fastapi_app.dependency_overrides[get_embedder] = lambda: FakeEmbedder(dim=TEST_EMBED_DIM)
+    with TestClient(fastapi_app) as c:
+        yield c
+    fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def judge_client(session_factory) -> Iterator[TestClient]:
+    """Client with a deterministic FakeJudge (no Anthropic calls)."""
+
+    def override() -> Iterator[Session]:
+        with session_factory() as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_session] = override
+    fastapi_app.dependency_overrides[get_judge] = lambda: FakeJudge()
     with TestClient(fastapi_app) as c:
         yield c
     fastapi_app.dependency_overrides.clear()
