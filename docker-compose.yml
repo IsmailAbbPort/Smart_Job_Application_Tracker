@@ -27,6 +27,10 @@ services:
       # Passed through from the project-root .env (compose substitutes ${...}).
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # AI models are env-swappable; defaults apply when unset.
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      JUDGE_MODEL: ${JUDGE_MODEL:-claude-haiku-4-5-20251001}
     # Migrate, seed target companies (idempotent), then serve. DB is healthy via depends_on.
     command: sh -c "alembic upgrade head && python -m app.ingest.targets && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:

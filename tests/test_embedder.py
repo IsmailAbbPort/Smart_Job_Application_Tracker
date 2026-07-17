@@ -7,6 +7,7 @@ from app.ai.embedder import (
     FakeEmbedder,
     build_cv_document,
     build_job_document,
+    clean_description,
 )
 from tests.conftest import make_canonical
 
@@ -26,12 +27,34 @@ def test_fake_embedder_custom_dim():
 
 def test_build_job_document_includes_key_fields():
     job = make_canonical(title="Senior Backend Engineer", company="GitLab", location="Berlin")
-    job.description = "Build things. " * 400  # long
+    job.description = "Build things. " * 400  # ~5600 chars, well over the token cap
     doc = build_job_document(job)
     assert "Senior Backend Engineer" in doc
     assert "at GitLab" in doc
     assert "Berlin" in doc
-    assert len(doc) < 2500  # description trimmed
+    # Body is token-capped (~768 tokens ≈ 3k chars), so the doc is trimmed but the
+    # high-signal header fields survive whole.
+    assert len(doc) < len(job.description)
+    assert len(doc) < 4000
+
+
+def test_clean_description_strips_boilerplate():
+    text = (
+        "We need a Python engineer with FastAPI and Postgres experience.\n\n"
+        "About us: we are a fast-growing startup changing the world.\n\n"
+        "What we offer: free lunch, ping pong, unlimited PTO.\n\n"
+        "You will design and ship backend services."
+    )
+    cleaned = clean_description(text)
+    assert "FastAPI and Postgres" in cleaned
+    assert "design and ship backend services" in cleaned
+    assert "ping pong" not in cleaned  # boilerplate paragraph removed
+    assert "fast-growing startup" not in cleaned
+
+
+def test_clean_description_never_empties():
+    # Everything looks like boilerplate -> fall back to original, not "".
+    assert clean_description("About us: we build things.") != ""
 
 
 def test_build_cv_document_trims():
