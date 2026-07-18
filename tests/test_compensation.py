@@ -37,6 +37,12 @@ def test_extract_salary_ignores_noise():
     assert extract_salary("") == (None, None, None)
 
 
+def test_extract_salary_skips_funding_finds_pay():
+    # Funding/valuation figures precede the real salary; scanning must skip them.
+    text = "We raised $781M, valued at $11B. Salary: $120,000 - $150,000 per year."
+    assert extract_salary(text) == (120000, 150000, "USD")
+
+
 def test_extract_effort_signals():
     got = extract_effort_signals("Submit a cover letter and complete our take-home challenge.")
     assert got == ["coding_challenge", "cover_letter"]
@@ -61,6 +67,44 @@ def test_min_salary_filter(client, session_factory):
         i["source_id"] for i in client.get("/jobs", params={"min_salary": 80000}).json()["items"]
     }
     assert ids == {"high", "unstated"}  # low dropped; unknown-pay kept
+
+
+def test_min_salary_require_salary(client, session_factory):
+    with session_factory() as s:
+        s.add_all(
+            [
+                _job("high", salary_max=150000, currency="USD"),
+                _job("unstated", salary_max=None),
+            ]
+        )
+        s.commit()
+    ids = {
+        i["source_id"]
+        for i in client.get("/jobs", params={"min_salary": 80000, "require_salary": "true"}).json()[
+            "items"
+        ]
+    }
+    assert ids == {"high"}  # unknown-pay now dropped too
+
+
+def test_min_salary_currency_only_compares_same_currency(client, session_factory):
+    with session_factory() as s:
+        s.add_all(
+            [
+                _job("eur_low", salary_max=50000, currency="EUR"),
+                _job("usd_low", salary_max=50000, currency="USD"),
+                _job("eur_high", salary_max=90000, currency="EUR"),
+            ]
+        )
+        s.commit()
+    ids = {
+        i["source_id"]
+        for i in client.get(
+            "/jobs", params={"min_salary": 60000, "min_salary_currency": "EUR"}
+        ).json()["items"]
+    }
+    # EUR floor drops only the low EUR job; the USD job can't be compared, so it stays.
+    assert ids == {"usd_low", "eur_high"}
 
 
 def test_backfill_sets_compensation(client, session_factory):

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     judge_model: str = "claude-haiku-4-5-20251001"
+    letter_model: str = "claude-sonnet-4-6"  # cover-letter drafting + fabrication check
 
     # Recency: shortlist ranking multiplies fit by a freshness weight in
     # [recency_floor, 1.0] that halves every recency_half_life_days. The floor keeps
@@ -40,6 +41,12 @@ class Settings(BaseSettings):
     # missing post date is treated as neutral (weight 1.0). See app/ai/matching.py.
     recency_half_life_days: float = 30.0
     recency_floor: float = 0.85
+
+    # Experience: shortlist multiplies fit by a soft penalty when a posting requires
+    # more years than the user has (see app/ai/matching.py). Kept gentle and floored
+    # so a strong stretch role still surfaces; a hard cutoff is a separate preference.
+    experience_penalty_per_year: float = 0.06
+    experience_floor: float = 0.6
 
 
 @lru_cache

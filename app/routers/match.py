@@ -10,19 +10,28 @@ from sqlalchemy.orm import Session
 
 from app.ai.embedder import Embedder, build_job_document, get_embedder
 from app.ai.judge import Judge, build_job_text, get_judge
-from app.ai.matching import rank_jobs, recency_weight
+from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
 from app.applications import annotate_application_status
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.ingest.eligibility import timezone_overlap_hours
 from app.models import Cv, Job, Match, SearchPreferences
 from app.prefs import get_preferences, preference_filters
-from app.schemas import JobOut, MatchOut, MatchVerdict, ShortlistItem, ShortlistResponse
+from app.schemas import (
+    JobOut,
+    MatchOut,
+    MatchVerdict,
+    RerankRequest,
+    ShortlistItem,
+    ShortlistResponse,
+)
 
 # How many fit-ranked candidates to pull before the recency re-rank. A few times
 # the page size is plenty for a gentle, floored decay to reshuffle near-ties.
 _CANDIDATE_MULTIPLIER = 3
 _MAX_CANDIDATES = 300
+# Cap on how many jobs one rerank call will judge (each is an LLM call + spend).
+_MAX_RERANK = 20
 
 router = APIRouter(prefix="/match", tags=["match"])
 
@@ -98,6 +107,13 @@ def shortlist(
     min_salary: int | None = Query(
         default=None, ge=1, description="Drop jobs whose stated max pay is below this"
     ),
+    min_salary_currency: str | None = Query(
+        default=None, description="Currency for min_salary; only same-currency compared"
+    ),
+    require_salary: bool = Query(default=False, description="Also drop jobs with no stated salary"),
+    max_experience_gap: int | None = Query(
+        default=None, ge=0, description="Hard-drop jobs needing >N years beyond your experience"
+    ),
     ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
     settings: Settings = Depends(get_settings),
 ) -> ShortlistResponse:
@@ -125,14 +141,17 @@ def shortlist(
         language=language,
         max_age_days=max_age_days,
         min_salary=min_salary,
+        min_salary_currency=min_salary_currency,
+        require_salary=require_salary,
+        max_experience_gap=max_experience_gap,
     )
 
-    # Over-fetch by fit, then re-rank by fit x freshness and keep the top `limit`.
+    # Over-fetch by fit, then re-rank by fit x freshness x experience penalty.
     candidate_limit = min(limit * _CANDIDATE_MULTIPLIER, _MAX_CANDIDATES)
     ranked = rank_jobs(session, list(cv.embedding), filters=filters, limit=candidate_limit)
 
     now = datetime.now(UTC)
-    scored: list[tuple[Job, float, float, int | None]] = []
+    scored = []  # (job, similarity, recency, overlap, gap, rank_score)
     for job, similarity in ranked:
         # Timezone-overlap eligibility (see prefs.py: done here, not in SQL).
         overlap = timezone_overlap_hours(job.required_utc_offsets, prefs.user_utc_offset)
@@ -142,27 +161,80 @@ def shortlist(
             and overlap < prefs.min_timezone_overlap_hours
         ):
             continue
-        weight = recency_weight(
+        recency = recency_weight(
             job.posted_at,
             now,
             half_life_days=settings.recency_half_life_days,
             floor=settings.recency_floor,
         )
-        scored.append((job, similarity, weight, overlap))
+        # Soft experience penalty: over-experienced roles rank lower but stay visible.
+        gap = experience_gap(job.min_years_experience, prefs.years_experience)
+        exp = experience_weight(
+            gap,
+            penalty_per_year=settings.experience_penalty_per_year,
+            floor=settings.experience_floor,
+        )
+        scored.append((job, similarity, recency, overlap, gap, similarity * recency * exp))
 
-    scored.sort(key=lambda t: t[1] * t[2], reverse=True)
+    scored.sort(key=lambda t: t[5], reverse=True)
 
     items = [
         ShortlistItem(
             **JobOut.model_validate(job).model_dump(),
             similarity=round(similarity, 4),
-            recency_weight=round(weight, 3),
+            recency_weight=round(recency, 3),
             timezone_overlap_hours=overlap,
+            experience_gap=gap,
         )
-        for job, similarity, weight, overlap in scored[:limit]
+        for job, similarity, recency, overlap, gap, _score in scored[:limit]
     ]
     annotate_application_status(session, items)
     return ShortlistResponse(cv_id=cv.id, count=len(items), items=items)
+
+
+def _judge_and_store(session: Session, judge: Judge, cv: Cv, job: Job, refresh: bool) -> Match:
+    """Judge one (cv, job) and persist the verdict. Returns the cached row unless refresh."""
+    existing = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
+    if existing is not None and not refresh:
+        return existing
+    verdict: MatchVerdict = judge.judge(cv.content, build_job_text(job))
+    match = existing or Match(cv_id=cv.id, job_id=job.id)
+    match.overall_score = verdict.overall_score
+    match.verdict = verdict.verdict.value
+    match.one_line_verdict = verdict.one_line_verdict
+    match.dimension_scores = verdict.dimension_scores.model_dump()
+    match.matched_requirements = [r.model_dump() for r in verdict.matched_requirements]
+    match.gaps = verdict.gaps
+    match.model = getattr(judge, "model", "")
+    session.add(match)
+    session.commit()
+    session.refresh(match)
+    return match
+
+
+@router.post("/rerank", response_model=list[MatchOut])
+def rerank(
+    payload: RerankRequest,
+    session: Session = Depends(get_session),
+    judge: Judge = Depends(get_judge),
+) -> list[MatchOut]:
+    """Batch-judge the given jobs (the high-precision rerank stage) and return them
+    ordered by the LLM judge's score - highest fit first.
+
+    The frontend passes the job_ids it is showing (top of the cosine shortlist), so
+    this reranks exactly the visible set. Cached per (cv, job); capped, and needs
+    ANTHROPIC_API_KEY (503 without it).
+    """
+    cv = _resolve_cv(session, payload.cv_id)
+    verdicts: list[MatchOut] = []
+    for job_id in payload.job_ids[:_MAX_RERANK]:
+        job = session.get(Job, job_id)
+        if job is None:
+            continue
+        verdicts.append(_to_match_out(_judge_and_store(session, judge, cv, job, payload.refresh)))
+    # Highest judge score first; cosine order (input order) breaks ties stably.
+    verdicts.sort(key=lambda m: m.overall_score, reverse=True)
+    return verdicts
 
 
 @router.post("/{job_id}", response_model=MatchOut)
@@ -182,26 +254,7 @@ def judge_job(
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-
-    existing = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
-    if existing is not None and not refresh:
-        return _to_match_out(existing)
-
-    verdict: MatchVerdict = judge.judge(cv.content, build_job_text(job))
-    model = getattr(judge, "model", "")
-
-    match = existing or Match(cv_id=cv.id, job_id=job.id)
-    match.overall_score = verdict.overall_score
-    match.verdict = verdict.verdict.value
-    match.one_line_verdict = verdict.one_line_verdict
-    match.dimension_scores = verdict.dimension_scores.model_dump()
-    match.matched_requirements = [r.model_dump() for r in verdict.matched_requirements]
-    match.gaps = verdict.gaps
-    match.model = model
-    session.add(match)
-    session.commit()
-    session.refresh(match)
-    return _to_match_out(match)
+    return _to_match_out(_judge_and_store(session, judge, cv, job, refresh))
 
 
 @router.get("/{job_id}", response_model=MatchOut)

@@ -35,6 +35,13 @@ def list_jobs(
     min_salary: int | None = Query(
         default=None, ge=1, description="Drop jobs whose stated max pay is below this"
     ),
+    min_salary_currency: str | None = Query(
+        default=None, description="Currency for min_salary (e.g. EUR); only same-currency compared"
+    ),
+    require_salary: bool = Query(default=False, description="Also drop jobs with no stated salary"),
+    max_experience_gap: int | None = Query(
+        default=None, ge=0, description="Drop jobs needing >N years beyond your experience"
+    ),
     q: str | None = Query(default=None, description="Substring match on title or company"),
     ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -49,6 +56,9 @@ def list_jobs(
         language=language,
         max_age_days=max_age_days,
         min_salary=min_salary,
+        min_salary_currency=min_salary_currency,
+        require_salary=require_salary,
+        max_experience_gap=max_experience_gap,
     )
     if source is not None:
         filters.append(Job.source == source)
@@ -71,6 +81,18 @@ def list_jobs(
     items = [JobOut.model_validate(r) for r in rows]
     annotate_application_status(session, items)
     return JobList(total=total, limit=limit, offset=offset, items=items)
+
+
+@router.get("/languages")
+def list_languages(session: Session = Depends(get_session)) -> list[dict]:
+    """Posting languages present in the corpus, with counts (for the UI filter)."""
+    rows = session.execute(
+        select(Job.language, func.count())
+        .where(Job.language.is_not(None))
+        .group_by(Job.language)
+        .order_by(func.count().desc())
+    ).all()
+    return [{"code": code, "count": count} for code, count in rows]
 
 
 @router.get("/{job_id}", response_model=JobDetail)

@@ -78,6 +78,8 @@ class Job(Base):
     salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     effort_signals: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Minimum years of experience the posting requires (entry bar), null if unstated.
+    min_years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -195,8 +197,42 @@ class SearchPreferences(Base):
     exclude_remote_regions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     user_utc_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_timezone_overlap_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Drop jobs whose stated max pay is below this (currency-naive; null-pay kept).
+    # Drop jobs whose stated max pay is below this (null-pay kept unless require_salary).
     min_salary: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The user's years of experience + an optional hard cutoff on how many years
+    # over that a posting may require before it is dropped (null cutoff = soft only).
+    years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_experience_gap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CoverLetter(Base):
+    """A CV-grounded cover letter for one job + its fabrication audit (Phase 4).
+
+    One row per (cv, job). `body` is the current text (drafted or user-edited);
+    `fabrication` stores the audit JSON (claims, placeholders, counts); `edited`
+    flips true once the user saves their own version.
+    """
+
+    __tablename__ = "cover_letter"
+    __table_args__ = (UniqueConstraint("cv_id", "job_id", name="uq_cover_letter_cv_job"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cv_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("cv.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("job.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    fabrication: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    model: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    edited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

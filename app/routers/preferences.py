@@ -38,6 +38,12 @@ def update_preferences(
         # A non-positive max age means "no cutoff" (store null).
         elif field == "max_age_days" and value is not None and value <= 0:
             value = None
+        # A negative experience gap makes no sense; treat it as "no cutoff".
+        elif field == "max_experience_gap" and value is not None and value < 0:
+            value = None
+        # Years of experience clamps at 0 (negative is meaningless).
+        elif field == "years_experience" and value is not None and value < 0:
+            value = 0
         setattr(prefs, field, value)
     session.commit()
     session.refresh(prefs)

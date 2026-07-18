@@ -25,6 +25,7 @@ from app.ingest.eligibility import (
     detect_visa_sponsorship,
     extract_required_utc_offsets,
 )
+from app.ingest.experience import extract_min_years_experience
 from app.ingest.geo import is_european, resolve_city, resolve_country
 from app.ingest.language import detect_language, extract_required_languages
 from app.ingest.normalize import (
@@ -118,6 +119,7 @@ def _apply_derived(job: Job) -> None:
     job.required_utc_offsets = extract_required_utc_offsets(job.description)
     job.salary_min, job.salary_max, job.salary_currency = extract_salary(job.description)
     job.effort_signals = extract_effort_signals(job.description)
+    job.min_years_experience = extract_min_years_experience(job.description)
 
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:

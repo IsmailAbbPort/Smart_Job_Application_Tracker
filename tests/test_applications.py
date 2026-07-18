@@ -49,6 +49,28 @@ def test_upsert_missing_job_404(client):
     assert client.post("/applications", json={"job_id": 999, "status": "saved"}).status_code == 404
 
 
+def test_records_cv_and_notes(client, session_factory):
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x"))
+        s.commit()
+        cv_id = s.query(Cv).one().id
+    job_id = _seed_job(session_factory)
+    body = client.post(
+        "/applications",
+        json={"job_id": job_id, "status": "applied", "cv_id": cv_id, "notes": "referred by A"},
+    ).json()
+    assert body["cv_id"] == cv_id
+    assert body["notes"] == "referred by A"
+
+
+def test_applied_at_not_reset_on_later_stage(client, session_factory):
+    job_id = _seed_job(session_factory)
+    first = client.post("/applications", json={"job_id": job_id, "status": "applied"}).json()
+    later = client.post("/applications", json={"job_id": job_id, "status": "interview"}).json()
+    # applied_at is stamped once (when it first left 'saved') and not overwritten.
+    assert later["applied_at"] == first["applied_at"]
+
+
 def test_list_filter_and_stats(client, session_factory):
     with session_factory() as s:
         s.add_all([_job("a"), _job("b"), _job("c")])

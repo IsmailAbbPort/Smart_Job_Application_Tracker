@@ -96,3 +96,49 @@ def test_judge_missing_job_404(judge_client, session_factory):
 
 def test_judge_no_cv_404(judge_client):
     assert judge_client.post("/match/1").status_code == 404
+
+
+# --- rerank (batch-judge + re-order) ---
+
+
+def test_rerank_orders_by_judge_score(judge_client, session_factory):
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="python fastapi postgres docker backend"))
+        s.add_all(
+            [
+                Job(
+                    source="t",
+                    source_id="low",
+                    title="Role",
+                    company="Acme",
+                    url="u1",
+                    description="sales marketing manager",
+                    is_remote=True,
+                    is_european=True,
+                ),
+                Job(
+                    source="t",
+                    source_id="high",
+                    title="Role",
+                    company="Acme",
+                    url="u2",
+                    description="python fastapi postgres docker backend",
+                    is_remote=True,
+                    is_european=True,
+                ),
+            ]
+        )
+        s.commit()
+        ids = {j.source_id: j.id for j in s.query(Job).all()}
+
+    # Pass low-fit first; the judge score must re-order it below the high-fit job.
+    resp = judge_client.post("/match/rerank", json={"job_ids": [ids["low"], ids["high"]]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [b["job_id"] for b in body] == [ids["high"], ids["low"]]
+    assert body[0]["overall_score"] >= body[1]["overall_score"]
+
+
+def test_rerank_requires_key(client):
+    # No judge override -> real get_judge -> 503 without ANTHROPIC_API_KEY.
+    assert client.post("/match/rerank", json={"job_ids": [1]}).status_code == 503

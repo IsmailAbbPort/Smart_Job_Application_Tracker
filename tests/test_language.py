@@ -81,6 +81,23 @@ def test_explicit_language_param(client, session_factory):
     assert ids == ["de"]
 
 
+def test_languages_facet_endpoint(client, session_factory):
+    with session_factory() as s:
+        s.add_all(
+            [
+                _job("a", language="en"),
+                _job("b", language="en"),
+                _job("c", language="de"),
+                _job("d", language=None),
+            ]
+        )
+        s.commit()
+    facets = client.get("/jobs/languages").json()
+    counts = {f["code"]: f["count"] for f in facets}
+    assert counts == {"en": 2, "de": 1}  # null excluded
+    assert facets[0]["code"] == "en"  # ordered by count desc
+
+
 def test_shortlist_respects_known_languages(client, session_factory):
     with session_factory() as s:
         s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))

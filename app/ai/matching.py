@@ -39,6 +39,34 @@ def recency_weight(
     return max(floor, 0.5 ** (age_days / half_life_days))
 
 
+def experience_gap(min_years_required: int | None, user_years: int | None) -> int | None:
+    """How many years a posting requires beyond the user's, or None if unknown.
+
+    Negative/zero means the user meets the bar; positive is the stretch. None when
+    either side is unknown, so the signal never penalizes missing data.
+    """
+    if min_years_required is None or user_years is None:
+        return None
+    return min_years_required - user_years
+
+
+def experience_weight(
+    gap: int | None,
+    *,
+    penalty_per_year: float,
+    floor: float,
+) -> float:
+    """Soft de-prioritization multiplier in [floor, 1.0] for over-experience.
+
+    A job requiring N years more than the user has loses penalty_per_year per year,
+    floored. Meeting/under the bar (gap <= 0) or unknown gap is neutral (1.0). This
+    keeps a stretch role visible but ranked lower, rather than dropping it.
+    """
+    if gap is None or gap <= 0:
+        return 1.0
+    return max(floor, 1.0 - penalty_per_year * gap)
+
+
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Cosine similarity in [-1, 1]; 0 if either vector is empty/zero."""
     if not a or not b:

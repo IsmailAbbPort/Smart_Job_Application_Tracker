@@ -33,6 +33,8 @@ def get_preferences(session: Session) -> SearchPreferences:
             user_utc_offset=None,
             min_timezone_overlap_hours=None,
             min_salary=None,
+            years_experience=None,
+            max_experience_gap=None,
         )
         session.add(prefs)
         session.commit()
@@ -50,6 +52,9 @@ def preference_filters(
     language: str | None = None,
     max_age_days: int | None = None,
     min_salary: int | None = None,
+    min_salary_currency: str | None = None,
+    require_salary: bool = False,
+    max_experience_gap: int | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build Job filter conditions from prefs + explicit overrides."""
     conditions: list[ColumnElement[bool]] = []
@@ -111,12 +116,32 @@ def preference_filters(
     # (Timezone-overlap eligibility is applied in the shortlist route, since the
     # overlap math over required_utc_offsets is not portable SQL.)
 
-    # minimum salary: drop jobs whose stated max pay is below the floor. Currency-
-    # naive (compares the number regardless of currency); jobs with no stated pay
-    # are kept. Explicit param wins over the stored default.
+    # minimum salary: drop jobs whose stated max pay is below the floor. Jobs with no
+    # stated pay are kept unless require_salary is set. When a currency is given, only
+    # same-currency jobs are compared (a EUR floor can't judge a USD figure), so
+    # different-currency jobs are kept. Explicit param wins over the stored default.
     effective_min_salary = min_salary if min_salary is not None else prefs.min_salary
     if effective_min_salary:
-        conditions.append(or_(Job.salary_max.is_(None), Job.salary_max >= effective_min_salary))
+        keep = [Job.salary_max >= effective_min_salary]
+        if not require_salary:
+            keep.append(Job.salary_max.is_(None))
+        if min_salary_currency:
+            keep.append(func.lower(Job.salary_currency) != min_salary_currency.lower())
+        conditions.append(or_(*keep))
+    elif require_salary:
+        conditions.append(Job.salary_max.is_not(None))
+
+    # experience hard cutoff (optional; soft de-ranking is done in the shortlist).
+    # Drop jobs that require more than max_experience_gap years beyond the user's.
+    # Needs the user's years; unknown-requirement jobs are kept. Explicit param wins.
+    gap_cutoff = max_experience_gap if max_experience_gap is not None else prefs.max_experience_gap
+    if gap_cutoff is not None and prefs.years_experience is not None:
+        conditions.append(
+            or_(
+                Job.min_years_experience.is_(None),
+                Job.min_years_experience <= prefs.years_experience + gap_cutoff,
+            )
+        )
 
     # blocklist (always applied). NULLs never match, so they are kept.
     excluded_countries = [c.lower() for c in (prefs.exclude_countries or [])]
