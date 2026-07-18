@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 - register tables on Base.metadata
+from app.ai.cover_letter import FakeDrafter, get_drafter
 from app.ai.embedder import FakeEmbedder, get_embedder
 from app.ai.judge import FakeJudge, get_judge
 from app.db import Base, get_session
@@ -141,6 +142,21 @@ def judge_client(session_factory) -> Iterator[TestClient]:
 
     fastapi_app.dependency_overrides[get_session] = override
     fastapi_app.dependency_overrides[get_judge] = lambda: FakeJudge()
+    with TestClient(fastapi_app) as c:
+        yield c
+    fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def letter_client(session_factory) -> Iterator[TestClient]:
+    """Client with a deterministic FakeDrafter (no Anthropic calls)."""
+
+    def override() -> Iterator[Session]:
+        with session_factory() as s:
+            yield s
+
+    fastapi_app.dependency_overrides[get_session] = override
+    fastapi_app.dependency_overrides[get_drafter] = lambda: FakeDrafter()
     with TestClient(fastapi_app) as c:
         yield c
     fastapi_app.dependency_overrides.clear()

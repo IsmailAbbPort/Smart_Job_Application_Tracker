@@ -13,7 +13,16 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.config import get_settings
 from app.db import ping
-from app.routers import applications, cv, ingest, jobs, match, preferences, targets
+from app.routers import (
+    applications,
+    cv,
+    ingest,
+    jobs,
+    letters,
+    match,
+    preferences,
+    targets,
+)
 
 settings = get_settings()
 
@@ -26,6 +35,7 @@ app.include_router(cv.router)
 app.include_router(match.router)
 app.include_router(preferences.router)
 app.include_router(applications.router)
+app.include_router(letters.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
