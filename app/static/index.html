@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Job Shortlist</title>
+  <title>Smart Job Tracker</title>
   <style>
     :root {
       --bg: #0f1115;
@@ -15,6 +15,9 @@
       --accent: #6ea8fe;
       --good: #4ade80;
       --warn: #fbbf24;
+      --bad: #f87171;
+      --purple: #a78bfa;
+      --radius: 10px;
     }
     * { box-sizing: border-box; }
     body {
@@ -23,185 +26,340 @@
       background: var(--bg);
       color: var(--text);
     }
+    a { color: inherit; }
+
+    /* Header + tabs */
     header {
-      padding: 20px 24px;
+      position: sticky; top: 0; z-index: 10;
+      background: rgba(15, 17, 21, 0.85);
+      backdrop-filter: blur(8px);
       border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
     }
-    header h1 { margin: 0; font-size: 20px; }
-    header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-    main { max-width: 920px; margin: 0 auto; padding: 24px; }
+    .brand { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+    .brand h1 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+    .brand .dot { color: var(--accent); }
+    .tabs { display: flex; gap: 4px; margin-left: auto; }
+    .tab {
+      background: transparent; color: var(--muted); border: 1px solid transparent;
+      border-radius: 999px; padding: 7px 16px; font: inherit; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 7px;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+    .tab-count {
+      font-size: 12px; font-weight: 700; background: var(--accent); color: #0b1020;
+      border-radius: 999px; padding: 0 7px; min-width: 18px; text-align: center;
+    }
+    .tab-count:empty { display: none; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .view.hidden { display: none; }
+
+    /* Controls */
     .controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: flex-end;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px;
+      display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
     }
     .controls.upload { margin-bottom: 12px; }
     input[type="file"] { color: var(--muted); font: inherit; }
     .field { display: flex; flex-direction: column; gap: 4px; }
     .field label { font-size: 12px; color: var(--muted); }
     select, input[type="text"], input[type="number"] {
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 8px 10px;
-      font: inherit;
-      min-width: 120px;
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 120px;
     }
+    select:focus, input:focus { outline: none; border-color: var(--accent); }
     .check { flex-direction: row; align-items: center; gap: 6px; }
     .check label { font-size: 13px; color: var(--text); }
+    .salary-input { display: flex; gap: 6px; }
+    .salary-input select { min-width: 64px; }
     button {
-      background: var(--accent);
-      color: #0b1020;
-      border: 0;
-      border-radius: 8px;
-      padding: 9px 16px;
-      font: inherit;
-      font-weight: 600;
-      cursor: pointer;
+      background: var(--accent); color: #0b1020; border: 0; border-radius: 8px;
+      padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer; transition: opacity .15s;
     }
+    button:hover { opacity: 0.92; }
     button:disabled { opacity: 0.6; cursor: default; }
-    .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
-    .status.error { color: #f87171; }
+
+    .status { margin: 16px 0 4px; color: var(--muted); font-size: 14px; min-height: 20px; }
+    .status.error { color: var(--bad); }
+    .pipeline { color: var(--muted); font-size: 13px; margin: 0 0 12px; min-height: 18px; }
+
+    /* Shortlist cards */
     .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 16px 18px;
-      margin-bottom: 12px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px 18px; margin-bottom: 12px; transition: border-color .15s;
     }
+    .card:hover { border-color: #384258; }
     .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
     .card a.title { color: var(--text); font-weight: 600; font-size: 16px; text-decoration: none; }
     .card a.title:hover { color: var(--accent); }
     .card .company { color: var(--muted); margin-top: 2px; }
-    .score {
-      flex: none;
-      text-align: right;
-    }
+    .jobid { color: #5a6172; font-size: 12px; user-select: all; }
+    .score { flex: none; text-align: right; }
     .score .num { font-weight: 700; font-size: 18px; color: var(--accent); }
     .score .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
     .meter { height: 6px; border-radius: 4px; background: var(--panel-2); margin-top: 10px; overflow: hidden; }
     .meter > span { display: block; height: 100%; background: linear-gradient(90deg, var(--warn), var(--good)); }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
     .badge {
-      font-size: 12px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      color: var(--muted);
-      background: var(--panel-2);
+      font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
+      color: var(--muted); background: var(--panel-2);
     }
     .badge.remote { color: var(--good); border-color: #2f5b3f; }
     .badge.eu { color: var(--accent); border-color: #2f4a6b; }
     .badge.warn { color: var(--warn); border-color: #6b5a2f; }
     .badge.good { color: var(--good); border-color: #2f5b3f; }
-    .badge.bad { color: #f87171; border-color: #6b2f2f; }
+    .badge.bad { color: var(--bad); border-color: #6b2f2f; }
     .assess { margin-top: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .status-sel { min-width: 130px; }
-    .pipeline { color: var(--muted); font-size: 13px; margin: 4px 0 12px; min-height: 18px; }
     .assess-btn {
-      background: transparent;
-      color: var(--accent);
-      border: 1px solid var(--border);
-      padding: 6px 12px;
-      font-size: 13px;
-      font-weight: 500;
+      background: transparent; color: var(--accent); border: 1px solid var(--border);
+      padding: 6px 12px; font-size: 13px; font-weight: 500;
     }
     .verdict { margin-top: 10px; font-size: 14px; flex-basis: 100%; }
     .verdict .headline { display: flex; align-items: center; gap: 8px; }
     .verdict .tier {
-      text-transform: uppercase;
-      font-size: 11px;
-      letter-spacing: 0.04em;
-      padding: 2px 8px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
+      text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em;
+      padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
     }
     .verdict .tier.strong { color: var(--good); border-color: #2f5b3f; }
     .verdict .tier.medium { color: var(--warn); border-color: #6b5a2f; }
-    .verdict .tier.weak { color: #f87171; border-color: #6b2f2f; }
+    .verdict .tier.weak { color: var(--bad); border-color: #6b2f2f; }
     .verdict .dims { color: var(--muted); font-size: 12px; margin-top: 6px; }
     .verdict ul { margin: 8px 0 0; padding-left: 18px; }
     .verdict .gap { color: var(--warn); }
-    .verdict.err { color: #f87171; }
+    .verdict.err { color: var(--bad); }
+    .letterbox { flex-basis: 100%; }
+    .letterbox .fab { margin: 10px 0 6px; display: flex; gap: 6px; }
+    .letterbox .fab-list { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .letterbox .fab-list ul { margin: 4px 0 0; padding-left: 18px; }
+    .letterbox .muted { color: var(--muted); font-size: 14px; padding: 8px 0; }
+    .letter-body {
+      width: 100%; min-height: 190px; resize: vertical; margin-bottom: 8px;
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px; font: inherit; line-height: 1.5;
+    }
+    .letter-body:focus { outline: none; border-color: var(--accent); }
+    .empty { color: var(--muted); text-align: center; padding: 40px 20px; font-size: 14px; }
+
+    /* Applications board */
+    .board-bar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .board-bar .summary { color: var(--muted); font-size: 13px; }
+    .board-bar .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+    .results-bar { display: flex; align-items: center; gap: 10px; margin: 8px 0 14px; }
+    .results-bar .hint { color: var(--muted); font-size: 13px; }
+    .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }
+    .col {
+      flex: 0 0 250px; background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); display: flex; flex-direction: column; max-height: 72vh;
+    }
+    .col.drag-over { border-color: var(--accent); background: #191d29; }
+    .col-head {
+      display: flex; align-items: center; gap: 8px; padding: 12px 14px;
+      border-bottom: 1px solid var(--border); position: sticky; top: 0;
+    }
+    .col-head .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .col-head .name { font-weight: 600; font-size: 13px; text-transform: capitalize; }
+    .col-head .cnt { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .col-body { padding: 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+    .col-body .col-empty { color: #5a6172; font-size: 12px; text-align: center; padding: 14px 4px; }
+    .appcard {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 11px; cursor: grab; position: relative; transition: border-color .15s, transform .05s;
+    }
+    .appcard:hover { border-color: #445273; }
+    .appcard:active { cursor: grabbing; }
+    .appcard.dragging { opacity: 0.5; }
+    .appcard .t { font-weight: 600; font-size: 13.5px; line-height: 1.3; padding-right: 16px; }
+    .appcard .t a { text-decoration: none; }
+    .appcard .t a:hover { color: var(--accent); }
+    .appcard .c { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .appcard .m { color: #667085; font-size: 11px; margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .appcard .rm {
+      position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; line-height: 16px; text-align: center;
+      border-radius: 4px; color: var(--muted); background: transparent; border: 0; padding: 0; font-size: 15px; cursor: pointer;
+      opacity: 0; transition: opacity .15s;
+    }
+    .appcard:hover .rm { opacity: 1; }
+    .appcard .rm:hover { color: var(--bad); background: #2a2f3d; }
+    .appcard .appstatus { width: 100%; min-width: 0; margin-top: 8px; font-size: 12px; padding: 5px 6px; }
+
     footer { color: var(--muted); font-size: 12px; text-align: center; padding: 24px; }
+
+    /* Account modal (optional sign-up) + segmented toggle */
+    .authbtn { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+    .authbtn:hover { color: var(--text); }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(8,10,14,.72); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+    .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 26px 24px; width: 100%; max-width: 380px; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal h2 { margin: 0 0 6px; font-size: 20px; }
+    .modal-text { color: var(--muted); font-size: 14px; margin: 0; }
+    .modal-x { position: absolute; top: 10px; right: 14px; background: transparent; border: 0; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; padding: 0; }
+    .modal-x:hover { color: var(--text); }
+    .modal form { display: flex; flex-direction: column; gap: 10px; }
+    .modal input { width: 100%; }
+    .modal-msg { color: var(--good); font-size: 13px; min-height: 16px; margin-top: 8px; }
+    .modal-skip { display: block; width: 100%; margin-top: 12px; background: transparent; color: var(--muted); border: 0; font: inherit; cursor: pointer; }
+    .modal-skip:hover { color: var(--text); }
+    /* Sliding-pill segmented toggle, replicated from the forsaprop SegmentedToggle. */
+    .seg { display: flex; position: relative; gap: 4px; background: var(--panel-2); border-radius: 999px; padding: 3px; width: 100%; margin: 16px 0 14px; }
+    .seg-slider { position: absolute; top: 3px; left: 3px; height: calc(100% - 6px); width: calc(50% - 5px); background: var(--accent); border-radius: 999px; transition: transform .3s cubic-bezier(.4,0,.2,1); z-index: 0; }
+    .seg-btn { flex: 1; padding: 8px 20px; border: 0; border-radius: 999px; cursor: pointer; font: inherit; font-weight: 600; background: transparent; color: var(--muted); position: relative; z-index: 1; transition: color .3s ease; }
+    .seg-btn.active { color: #0b1020; }
+    .seg-btn:hover:not(.active) { color: var(--text); }
   </style>
 </head>
 <body>
   <header>
-    <h1>Job Shortlist</h1>
-    <p>Cosine-ranked matches for your CV. Data comes from the running API.</p>
+    <div class="brand">
+      <h1>Smart Job<span class="dot">.</span>Tracker</h1>
+      <nav class="tabs">
+        <button class="tab active" data-view="shortlist">Shortlist</button>
+        <button class="tab" data-view="board">Applications <span class="tab-count" id="tabCount"></span></button>
+      </nav>
+      <button class="authbtn" id="authOpen">Sign in</button>
+    </div>
   </header>
 
+  <div class="modal-backdrop" id="authModal">
+    <div class="modal">
+      <button class="modal-x" id="authClose" aria-label="Close">&times;</button>
+      <h2>Hi! &#128075;</h2>
+      <p class="modal-text">An account isn&rsquo;t necessary to use this tool. But if you&rsquo;d like your shortlist, applications, and preferences saved for another session, you can create one.</p>
+      <div class="seg" id="authToggle" role="tablist" aria-label="Sign up or log in">
+        <div class="seg-slider" id="authSlider"></div>
+        <button type="button" class="seg-btn active" data-mode="signup" role="tab">Sign up</button>
+        <button type="button" class="seg-btn" data-mode="login" role="tab">Log in</button>
+      </div>
+      <form id="authForm">
+        <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" required />
+        <input type="password" id="authPassword" placeholder="Password (min 6 characters)" autocomplete="current-password" minlength="6" required />
+        <button type="submit" id="authSubmit">Sign up</button>
+      </form>
+      <div class="modal-msg" id="authMsg"></div>
+      <button class="modal-skip" id="authSkip">Continue without an account &rarr;</button>
+    </div>
+  </div>
+
   <main>
-    <form class="controls upload" id="upload">
-      <div class="field" style="flex: 1 1 240px">
-        <label for="cvfile">Upload a new CV (PDF or .txt)</label>
-        <input type="file" id="cvfile" accept=".pdf,.txt,text/plain,application/pdf" />
-      </div>
-      <div class="field" style="flex: 1 1 180px">
-        <label for="cvlabel">Label</label>
-        <input type="text" id="cvlabel" placeholder="e.g. CV 2026-07" />
-      </div>
-      <button type="submit" id="upbtn">Upload &amp; embed</button>
-    </form>
+    <!-- ===================== SHORTLIST VIEW ===================== -->
+    <section id="view-shortlist" class="view">
+      <form class="controls upload" id="upload">
+        <div class="field" style="flex: 1 1 240px">
+          <label for="cvfile">Upload a new CV (PDF or .txt)</label>
+          <input type="file" id="cvfile" accept=".pdf,.txt,text/plain,application/pdf" />
+        </div>
+        <div class="field" style="flex: 1 1 180px">
+          <label for="cvlabel">Label</label>
+          <input type="text" id="cvlabel" placeholder="e.g. CV 2026-07" />
+        </div>
+        <button type="submit" id="upbtn">Upload &amp; embed</button>
+      </form>
 
-    <form class="controls" id="controls">
-      <div class="field">
-        <label for="cv">CV</label>
-        <select id="cv"><option>loading...</option></select>
-      </div>
-      <div class="field">
-        <label for="limit">Results</label>
-        <input type="number" id="limit" value="25" min="1" max="100" />
-      </div>
-      <div class="field">
-        <label for="cities">Cities (comma-separated)</label>
-        <input type="text" id="cities" placeholder="e.g. Berlin, Paris" style="min-width: 260px" />
-      </div>
-      <div class="field">
-        <label for="country">Country (opt.)</label>
-        <input type="text" id="country" placeholder="e.g. Germany" />
-      </div>
-      <div class="field">
-        <label for="language">Language (opt.)</label>
-        <input type="text" id="language" placeholder="e.g. en" style="min-width: 90px" />
-      </div>
-      <div class="field">
-        <label for="max_age">Posted within (days)</label>
-        <input type="number" id="max_age" min="1" placeholder="any" style="min-width: 90px" />
-      </div>
-      <div class="field">
-        <label for="min_salary">Min salary</label>
-        <input type="number" id="min_salary" min="1" step="1000" placeholder="any" style="min-width: 100px" />
-      </div>
-      <div class="field">
-        <label for="remote">Remote</label>
-        <select id="remote">
-          <option value="">Any</option>
-          <option value="true">Remote only</option>
-          <option value="false">Not remote</option>
-        </select>
-      </div>
-      <div class="field check">
-        <input type="checkbox" id="europe" />
-        <label for="europe">Europe only</label>
-      </div>
-      <div class="field check">
-        <input type="checkbox" id="ignore_prefs" />
-        <label for="ignore_prefs">Ignore saved prefs</label>
-      </div>
-      <button type="submit" id="go">Shortlist</button>
-    </form>
+      <form class="controls" id="controls">
+        <div class="field">
+          <label for="cv">CV</label>
+          <select id="cv"><option>loading...</option></select>
+        </div>
+        <div class="field">
+          <label for="limit">Results</label>
+          <select id="limit">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cities">Cities (comma-separated)</label>
+          <input type="text" id="cities" placeholder="e.g. Berlin, Paris" style="min-width: 220px" />
+        </div>
+        <div class="field">
+          <label for="country">Country (opt.)</label>
+          <input type="text" id="country" placeholder="e.g. Germany" />
+        </div>
+        <div class="field">
+          <label for="language">Language</label>
+          <input list="language-list" id="language" placeholder="Any (type to search)" style="min-width: 150px" />
+          <datalist id="language-list"></datalist>
+        </div>
+        <div class="field">
+          <label for="timezone">Your timezone</label>
+          <input list="tz-list" id="timezone" placeholder="Type to search" style="min-width: 200px" />
+          <datalist id="tz-list"></datalist>
+        </div>
+        <div class="field">
+          <label for="max_age">Posted within (days)</label>
+          <input type="number" id="max_age" min="1" step="1" placeholder="any" style="min-width: 90px" />
+        </div>
+        <div class="field">
+          <label for="min_salary">Min salary</label>
+          <div class="salary-input">
+            <input type="number" id="min_salary" min="0" step="any" placeholder="any" style="min-width: 84px" />
+            <select id="salary_currency" title="Currency">
+              <option value="">any</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="USD">USD</option>
+            </select>
+            <select id="salary_period" title="Period">
+              <option value="year">/yr</option>
+              <option value="month">/mo</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="years_exp">Your experience (yrs)</label>
+          <input type="number" id="years_exp" min="0" step="1" placeholder="e.g. 3" style="min-width: 90px" />
+        </div>
+        <div class="field">
+          <label for="max_gap">Max yrs over (hard)</label>
+          <input type="number" id="max_gap" min="0" step="1" placeholder="off" style="min-width: 90px" />
+        </div>
+        <div class="field">
+          <label for="remote">Remote</label>
+          <select id="remote">
+            <option value="">Any</option>
+            <option value="true">Remote only</option>
+            <option value="false">Not remote</option>
+          </select>
+        </div>
+        <div class="field check">
+          <input type="checkbox" id="europe" />
+          <label for="europe">Europe only</label>
+        </div>
+        <div class="field check">
+          <input type="checkbox" id="require_salary" />
+          <label for="require_salary">Salary listed only</label>
+        </div>
+        <div class="field check">
+          <input type="checkbox" id="ignore_prefs" />
+          <label for="ignore_prefs">Ignore saved prefs</label>
+        </div>
+        <button type="submit" id="go">Shortlist</button>
+      </form>
 
-    <div class="status" id="status"></div>
-    <div class="pipeline" id="pipeline"></div>
-    <div id="results"></div>
+      <div class="status" id="status"></div>
+      <div class="pipeline" id="pipeline"></div>
+      <div class="results-bar" id="resultsBar" style="display:none">
+        <button id="rerank" title="Batch-judge the top jobs with Claude and re-order by fit">Rank top 10 with AI</button>
+        <span class="hint">Export:</span>
+        <button class="assess-btn" id="dlCsv">CSV</button>
+        <button class="assess-btn" id="dlTxt">TXT</button>
+        <button class="assess-btn" id="dlPdf" title="Available for 50 results or fewer">PDF</button>
+      </div>
+      <div id="results"></div>
+    </section>
+
+    <!-- ===================== APPLICATIONS BOARD VIEW ===================== -->
+    <section id="view-board" class="view hidden">
+      <div class="board-bar">
+        <span class="summary" id="boardSummary"></span>
+        <button class="assess-btn" id="boardRefresh">Refresh</button>
+        <span class="hint">Drag a card between columns to change its stage.</span>
+      </div>
+      <div class="board" id="board"></div>
+    </section>
   </main>
 
   <footer>Smart Job Application Tracker</footer>
@@ -210,9 +368,26 @@
     const $ = (id) => document.getElementById(id);
     const statusEl = $("status");
     const resultsEl = $("results");
-    const STATUSES = ["saved", "applied", "screening", "interview", "offer", "rejected", "ghosted", "withdrawn"];
+    // Pipeline stages, in board order, with a colour accent.
+    const STAGES = [
+      { key: "saved", color: "#9aa3b2" },
+      { key: "applied", color: "#6ea8fe" },
+      { key: "screening", color: "#a78bfa" },
+      { key: "interview", color: "#fbbf24" },
+      { key: "offer", color: "#4ade80" },
+      { key: "rejected", color: "#f87171" },
+      { key: "ghosted", color: "#6b7280" },
+      { key: "withdrawn", color: "#6b7280" },
+    ];
+    const STATUSES = STAGES.map((s) => s.key);
+    const STAGE_COLOR = Object.fromEntries(STAGES.map((s) => [s.key, s.color]));
     const EFFORT_LABELS = { cover_letter: "cover letter", coding_challenge: "coding challenge", portfolio: "portfolio" };
 
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+      );
+    }
     function fmtSalary(job) {
       if (!job.salary_max && !job.salary_min) return null;
       const sym = { USD: "$", EUR: "€", GBP: "£" }[job.salary_currency] ||
@@ -222,19 +397,30 @@
         return `${sym}${k(job.salary_min)}-${k(job.salary_max)}`;
       return `${sym}${k(job.salary_max || job.salary_min)}`;
     }
-
     function setStatus(msg, isError = false) {
       statusEl.textContent = msg;
       statusEl.classList.toggle("error", isError);
     }
-
     function fmtDate(iso) {
       if (!iso) return null;
       const d = new Date(iso);
       if (isNaN(d)) return null;
       return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
     }
+    function locationText(job) {
+      return job.city || job.country || job.location || "Location not specified";
+    }
 
+    /* ---------------- View switching ---------------- */
+    function showView(name) {
+      document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === name));
+      $("view-shortlist").classList.toggle("hidden", name !== "shortlist");
+      $("view-board").classList.toggle("hidden", name !== "board");
+      if (name === "board") loadBoard();
+    }
+    document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => showView(t.dataset.view)));
+
+    /* ---------------- Shortlist ---------------- */
     async function loadCvs() {
       try {
         const res = await fetch("/cv");
@@ -246,9 +432,8 @@
           return;
         }
         sel.innerHTML = cvs
-          .map((c) => `<option value="${c.id}">${c.label}${c.embedded ? "" : " (no embedding)"}</option>`)
+          .map((c) => `<option value="${c.id}">${esc(c.label)}${c.embedded ? "" : " (no embedding)"}</option>`)
           .join("");
-        // Honor cv_id from the URL if present; otherwise the newest CV stays selected.
         const wantCv = new URLSearchParams(location.search).get("cv_id");
         if (wantCv && cvs.some((c) => String(c.id) === wantCv)) sel.value = wantCv;
       } catch (e) {
@@ -257,80 +442,103 @@
       }
     }
 
-    function locationText(job) {
-      return job.city || job.country || job.location || "Location not specified";
+    function jobBadges(job) {
+      const b = [];
+      if (job.is_remote) b.push('<span class="badge remote">Remote</span>');
+      if (job.is_european) b.push('<span class="badge eu">Europe</span>');
+      if (job.language) b.push(`<span class="badge">${esc(job.language.toUpperCase())}</span>`);
+      if (job.required_languages && job.required_languages.length)
+        b.push(`<span class="badge warn">needs ${esc(job.required_languages.join(", "))}</span>`);
+      if (job.visa_sponsorship === true) b.push('<span class="badge good">sponsors visa</span>');
+      if (job.visa_sponsorship === false) b.push('<span class="badge bad">no sponsorship</span>');
+      if (job.remote_region) b.push(`<span class="badge warn">${esc(job.remote_region.toUpperCase())}-only</span>`);
+      if (typeof job.timezone_overlap_hours === "number")
+        b.push(`<span class="badge ${job.timezone_overlap_hours >= 4 ? "good" : "bad"}">TZ ${job.timezone_overlap_hours}h</span>`);
+      const salary = fmtSalary(job);
+      if (salary) b.push(`<span class="badge good">${esc(salary)}</span>`);
+      (job.effort_signals || []).forEach((e) => b.push(`<span class="badge warn">${esc(EFFORT_LABELS[e] || e)}</span>`));
+      if (typeof job.experience_gap === "number" && job.experience_gap > 0)
+        b.push(`<span class="badge bad">stretch +${job.experience_gap}y</span>`);
+      else if (typeof job.min_years_experience === "number")
+        b.push(`<span class="badge">${job.min_years_experience}+ yrs</span>`);
+      return b;
     }
 
+    let lastResults = null;
+    let judged = {}; // job_id -> AI-judge verdict, once "Rank with AI" has run
     function renderResults(data) {
+      lastResults = data;
+      $("resultsBar").style.display = data.items.length ? "flex" : "none";
+      // PDF is reserved for small result sets (10/25/50); 100 is CSV/TXT only.
+      $("dlPdf").style.display = data.items.length && data.items.length <= 50 ? "" : "none";
       if (!data.items.length) {
-        resultsEl.innerHTML = "";
-        setStatus("No matches for these filters.");
+        resultsEl.innerHTML = '<div class="empty">No matches for these filters.</div>';
+        setStatus(`0 results for CV #${data.cv_id}.`);
         return;
       }
-      setStatus(`${data.count} result${data.count === 1 ? "" : "s"} for CV #${data.cv_id}.`);
+      setStatus(
+        `${data.count} result${data.count === 1 ? "" : "s"} for CV #${data.cv_id}, ranked by fit x freshness. ` +
+        `Bars show fit relative to the top match; "Assess fit" gives the AI judge's calibrated 0-100 score.`
+      );
+      // Cosine values cluster in a narrow band, so a raw "%" misleads. Show rank +
+      // a bar relative to the best match in this set instead.
+      const maxSim = Math.max(...data.items.map((j) => j.similarity), 0.0001);
       resultsEl.innerHTML = data.items
-        .map((job) => {
-          const pct = Math.max(0, Math.min(100, Math.round(job.similarity * 100)));
+        .map((job, i) => {
+          const rel = Math.max(3, Math.round((job.similarity / maxSim) * 100));
           const posted = fmtDate(job.posted_at);
-          const badges = [];
-          if (job.is_remote) badges.push('<span class="badge remote">Remote</span>');
-          if (job.is_european) badges.push('<span class="badge eu">Europe</span>');
-          if (job.language) badges.push(`<span class="badge">${esc(job.language.toUpperCase())}</span>`);
-          if (job.required_languages && job.required_languages.length)
-            badges.push(`<span class="badge warn">needs ${esc(job.required_languages.join(", "))}</span>`);
-          if (job.visa_sponsorship === true) badges.push('<span class="badge good">sponsors visa</span>');
-          if (job.visa_sponsorship === false) badges.push('<span class="badge bad">no sponsorship</span>');
-          if (job.remote_region) badges.push(`<span class="badge warn">${esc(job.remote_region.toUpperCase())}-only</span>`);
-          if (typeof job.timezone_overlap_hours === "number") {
-            const tzCls = job.timezone_overlap_hours >= 4 ? "good" : "bad";
-            badges.push(`<span class="badge ${tzCls}">TZ ${job.timezone_overlap_hours}h</span>`);
-          }
-          const salary = fmtSalary(job);
-          if (salary) badges.push(`<span class="badge good">${esc(salary)}</span>`);
-          (job.effort_signals || []).forEach((e) =>
-            badges.push(`<span class="badge warn">${esc(EFFORT_LABELS[e] || e)}</span>`)
-          );
-          badges.push(`<span class="badge">${job.source}</span>`);
+          const badges = jobBadges(job);
+          badges.push(`<span class="badge">${esc(job.source)}</span>`);
           if (posted) badges.push(`<span class="badge">Posted ${posted}</span>`);
+          const jv = judged[job.id];
+          const scoreHtml = jv
+            ? `<div class="score" title="AI judge score (calibrated 0-100)"><div class="num">${jv.overall_score}</div><div class="lbl">${esc(jv.verdict)}</div></div>`
+            : `<div class="score" title="cosine similarity ${job.similarity}"><div class="num">#${i + 1}</div><div class="lbl">by fit</div></div>`;
           return `
             <div class="card">
               <div class="top">
                 <div>
-                  <a class="title" href="${job.url}" target="_blank" rel="noopener">${job.title}</a>
-                  <div class="company">${job.company} &middot; ${locationText(job)}</div>
+                  <a class="title" href="${esc(job.url)}" target="_blank" rel="noopener">${esc(job.title)}</a>
+                  <div class="company">${esc(job.company)} &middot; ${esc(locationText(job))} <span class="jobid" title="job id in the database">#${job.id}</span></div>
                 </div>
-                <div class="score">
-                  <div class="num">${pct}%</div>
-                  <div class="lbl">match</div>
-                </div>
+                ${scoreHtml}
               </div>
-              <div class="meter"><span style="width:${pct}%"></span></div>
+              <div class="meter" title="fit relative to the top match"><span style="width:${rel}%"></span></div>
               <div class="badges">${badges.join("")}</div>
               <div class="assess">
                 <select class="status-sel" data-job="${job.id}" title="Pipeline status">
                   <option value="">Not tracked</option>
                   ${STATUSES.map((st) => `<option value="${st}"${job.application_status === st ? " selected" : ""}>${st}</option>`).join("")}
                 </select>
-                <button class="assess-btn" data-job="${job.id}">Assess fit (AI judge)</button>
+                <button class="assess-btn" data-job="${job.id}" data-act="judge">Assess fit (AI judge)</button>
+                <button class="assess-btn" data-job="${job.id}" data-act="letter">Draft cover letter</button>
                 <div class="verdict" id="verdict-${job.id}"></div>
+                <div class="letterbox" id="letter-${job.id}"></div>
               </div>
             </div>`;
         })
         .join("");
+      // Re-apply any AI-judge verdicts (from "Rank with AI") into the rendered cards.
+      Object.keys(judged).forEach((id) => {
+        const el = $(`verdict-${id}`);
+        if (el) renderVerdict(el, judged[id]);
+      });
     }
 
-    // Preload the form from URL query params so a link is shareable/bookmarkable.
     function applyUrlToForm() {
       const q = new URLSearchParams(location.search);
       if (q.has("limit")) $("limit").value = q.get("limit");
       if (q.has("cities")) $("cities").value = q.getAll("cities").join(",");
       if (q.has("country")) $("country").value = q.get("country");
-      if (q.has("language")) $("language").value = q.get("language");
       if (q.has("max_age_days")) $("max_age").value = q.get("max_age_days");
       if (q.has("min_salary")) $("min_salary").value = q.get("min_salary");
+      if (q.has("min_salary_currency")) $("salary_currency").value = q.get("min_salary_currency");
+      if (q.get("require_salary") === "true") $("require_salary").checked = true;
+      if (q.has("max_experience_gap")) $("max_gap").value = q.get("max_experience_gap");
       if (q.has("is_remote")) $("remote").value = q.get("is_remote");
       if (q.get("europe") === "true") $("europe").checked = true;
       if (q.get("ignore_prefs") === "true") $("ignore_prefs").checked = true;
+      // language is a select populated async -> set in loadLanguages()
     }
 
     function buildParams() {
@@ -343,26 +551,100 @@
       if ($("ignore_prefs").checked) params.set("ignore_prefs", "true");
       const country = $("country").value.trim();
       if (country) params.set("country", country);
-      const language = $("language").value.trim();
+      const language = $("language").value;
       if (language) params.set("language", language);
       const maxAge = $("max_age").value.trim();
       if (maxAge) params.set("max_age_days", maxAge);
-      const minSalary = $("min_salary").value.trim();
-      if (minSalary) params.set("min_salary", minSalary);
-      const cities = $("cities").value
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-      cities.forEach((c) => params.append("cities", c));
+      // Min salary: normalize monthly -> annual, attach currency, optional require.
+      const rawSalary = parseFloat($("min_salary").value);
+      if (!isNaN(rawSalary) && rawSalary > 0) {
+        const annual = $("salary_period").value === "month" ? rawSalary * 12 : rawSalary;
+        if (annual >= 1) {
+          params.set("min_salary", Math.round(annual));
+          const cur = $("salary_currency").value;
+          if (cur) params.set("min_salary_currency", cur);
+        }
+      }
+      if ($("require_salary").checked) params.set("require_salary", "true");
+      const maxGap = $("max_gap").value.trim();
+      if (maxGap !== "") params.set("max_experience_gap", maxGap);
+      $("cities").value.split(",").map((c) => c.trim()).filter(Boolean).forEach((c) => params.append("cities", c));
       return params;
+    }
+
+    // Populate the language filter from what's actually in the corpus.
+    async function loadLanguages() {
+      try {
+        const langs = await (await fetch("/jobs/languages")).json();
+        langs.sort((a, b) => a.code.localeCompare(b.code)); // alphabetical
+        $("language-list").innerHTML = langs
+          .map((l) => `<option value="${esc(l.code)}">${esc(l.code.toUpperCase())} — ${l.count} jobs</option>`)
+          .join("");
+        const want = new URLSearchParams(location.search).get("language");
+        if (want) $("language").value = want;
+      } catch {}
+    }
+
+    // Timezone picker (searchable datalist). Value is a readable string; the UTC
+    // offset is parsed out of it. Defaults to Cairo (UTC+2) per the user.
+    const TIMEZONES = [
+      [-8, "Los Angeles (PST)"], [-7, "Denver (MST)"], [-6, "Chicago (CST)"],
+      [-5, "New York (EST)"], [-3, "Sao Paulo (BRT)"], [0, "London (GMT)"],
+      [1, "Berlin / Paris (CET)"], [2, "Cairo (EET)"], [3, "Moscow (MSK)"],
+      [4, "Dubai (GST)"], [5, "Karachi (PKT)"], [6, "Dhaka (BST)"],
+      [8, "Singapore (SGT)"], [9, "Tokyo (JST)"], [10, "Sydney (AEST)"],
+    ];
+    const CAIRO_OFFSET = 2;
+    function tzLabel(off) {
+      const city = (TIMEZONES.find(([o]) => o === off) || [off, ""])[1];
+      const sign = off >= 0 ? "+" : "-";
+      return `UTC${sign}${String(Math.abs(off)).padStart(2, "0")}:00 ${city}`.trim();
+    }
+    function loadTimezones() {
+      $("tz-list").innerHTML = TIMEZONES.map(([off]) => `<option value="${esc(tzLabel(off))}"></option>`).join("");
+    }
+    function tzOffsetFromInput() {
+      const m = $("timezone").value.match(/UTC([+-]\d{1,2})/);
+      return m ? parseInt(m[1], 10) : null;
+    }
+
+    // Your years of experience is a stable preference; load and persist it.
+    let prefYears = null, prefTz = null;
+    async function loadPrefs() {
+      let off = CAIRO_OFFSET;
+      try {
+        const p = await (await fetch("/preferences")).json();
+        prefYears = p.years_experience;
+        if (p.years_experience != null) $("years_exp").value = p.years_experience;
+        prefTz = p.user_utc_offset;
+        if (p.user_utc_offset != null) off = p.user_utc_offset;
+      } catch {}
+      $("timezone").value = tzLabel(off); // default to Cairo when unset
+    }
+    async function persistPrefs() {
+      const yv = $("years_exp").value.trim();
+      const years = yv === "" ? null : Number(yv);
+      const tz = tzOffsetFromInput();
+      const patch = {};
+      if (years !== prefYears) patch.years_experience = years;
+      if (tz !== prefTz) patch.user_utc_offset = tz;
+      if (!Object.keys(patch).length) return;
+      try {
+        await fetch("/preferences", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        prefYears = years;
+        prefTz = tz;
+      } catch {}
     }
 
     async function runShortlist(ev) {
       if (ev) ev.preventDefault();
+      await persistPrefs();
+      judged = {}; // a new search invalidates any prior AI ranking
       const params = buildParams();
-      // Reflect the current filters in the address bar (without cv_id noise stays fine).
       history.replaceState(null, "", "/?" + params.toString());
-
       $("go").disabled = true;
       setStatus("Loading shortlist...");
       resultsEl.innerHTML = "";
@@ -381,7 +663,6 @@
       }
     }
 
-    // Read a File as base64 (strip the "data:...;base64," prefix the browser adds).
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -394,18 +675,14 @@
     async function uploadCv(ev) {
       ev.preventDefault();
       const file = $("cvfile").files[0];
-      if (!file) {
-        setStatus("Pick a CV file first.", true);
-        return;
-      }
+      if (!file) { setStatus("Pick a CV file first.", true); return; }
       const label = $("cvlabel").value.trim() || file.name;
       $("upbtn").disabled = true;
       setStatus("Uploading and embedding CV...");
       try {
         const content_base64 = await fileToBase64(file);
         const res = await fetch("/cv/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ label, filename: file.name, content_base64 }),
         });
         if (!res.ok) {
@@ -414,9 +691,7 @@
           throw new Error(detail);
         }
         const cv = await res.json();
-        $("cvfile").value = "";
-        $("cvlabel").value = "";
-        // Reload the CV list, select the one we just made, and re-run the shortlist.
+        $("cvfile").value = ""; $("cvlabel").value = "";
         await loadCvs();
         $("cv").value = String(cv.id);
         setStatus(`Uploaded "${cv.label}" (CV #${cv.id}). Ranking...`);
@@ -428,17 +703,10 @@
       }
     }
 
-    function esc(s) {
-      return String(s ?? "").replace(/[&<>"]/g, (c) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
-      );
-    }
-
     function renderVerdict(el, v) {
       const d = v.dimension_scores || {};
       const matched = (v.matched_requirements || [])
-        .map((m) => `<li>${esc(m.requirement)} <span style="color:var(--muted)">- ${esc(m.cv_evidence)}</span></li>`)
-        .join("");
+        .map((m) => `<li>${esc(m.requirement)} <span style="color:var(--muted)">- ${esc(m.cv_evidence)}</span></li>`).join("");
       const gaps = (v.gaps || []).map((g) => `<li class="gap">${esc(g)}</li>`).join("");
       el.className = "verdict";
       el.innerHTML = `
@@ -460,8 +728,7 @@
       el.className = "verdict";
       el.textContent = "Asking the judge...";
       try {
-        const q = cvId ? `?cv_id=${cvId}` : "";
-        const res = await fetch(`/match/${jobId}${q}`, { method: "POST" });
+        const res = await fetch(`/match/${jobId}${cvId ? `?cv_id=${cvId}` : ""}`, { method: "POST" });
         if (!res.ok) {
           let detail = "HTTP " + res.status;
           try { detail = (await res.json()).detail || detail; } catch {}
@@ -476,51 +743,355 @@
       }
     }
 
-    resultsEl.addEventListener("click", (ev) => {
-      const btn = ev.target.closest(".assess-btn");
-      if (btn) assess(btn);
-    });
-
-    async function refreshStats() {
-      try {
-        const s = await (await fetch("/applications/stats")).json();
-        const parts = Object.entries(s.by_status)
-          .filter(([, n]) => n > 0)
-          .map(([k, n]) => `${k}: ${n}`);
-        $("pipeline").textContent = s.total ? "Pipeline - " + parts.join("  ·  ") : "";
-      } catch {}
+    function renderLetter(el, data) {
+      const f = data.fabrication || {};
+      const unsupported = (f.claims || []).filter((c) => !c.supported);
+      const badgeCls = f.unsupported_count ? "bad" : "good";
+      const pct = Math.round((f.grounded_ratio ?? 1) * 100);
+      const claimsHtml = unsupported.length
+        ? `<div class="fab-list">Unsupported claims (remove or back with a real fact):<ul>${unsupported.map((c) => `<li class="gap">${esc(c.claim)}</li>`).join("")}</ul></div>`
+        : "";
+      const phHtml = (f.placeholders || []).length
+        ? `<div class="fab-list">Fill in before sending:<ul>${f.placeholders.map((p) => `<li class="gap">[${esc(p)}]</li>`).join("")}</ul></div>`
+        : "";
+      el.innerHTML = `
+        <div class="fab">
+          <span class="badge ${badgeCls}">Fabrication check: ${f.unsupported_count || 0} unsupported (${pct}% grounded)</span>
+          ${data.edited ? '<span class="badge">edited</span>' : ""}
+        </div>
+        ${claimsHtml}${phHtml}
+        <textarea class="letter-body" id="letterbody-${data.job_id}">${esc(data.body)}</textarea>
+        <div><button class="assess-btn letter-save" data-job="${data.job_id}">Save edits</button></div>`;
     }
 
-    async function trackStatus(sel) {
-      const jobId = sel.dataset.job;
-      const status = sel.value;
+    async function draftLetter(btn) {
+      const jobId = btn.dataset.job;
+      const el = $(`letter-${jobId}`);
+      const cvId = $("cv").value;
+      btn.disabled = true;
+      el.innerHTML = '<div class="muted">Drafting a CV-grounded letter and auditing it...</div>';
+      try {
+        const res = await fetch(`/letters/${jobId}${cvId ? `?cv_id=${cvId}` : ""}`, { method: "POST" });
+        if (!res.ok) {
+          let detail = "HTTP " + res.status;
+          try { detail = (await res.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        renderLetter(el, await res.json());
+      } catch (e) {
+        el.innerHTML = `<div class="verdict err">Drafter unavailable: ${esc(e.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function saveLetter(jobId) {
+      const cvId = $("cv").value;
+      const body = $(`letterbody-${jobId}`).value;
+      try {
+        const res = await fetch(`/letters/${jobId}${cvId ? `?cv_id=${cvId}` : ""}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body }),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        renderLetter($(`letter-${jobId}`), await res.json());
+      } catch (e) {
+        setStatus("Could not save letter: " + e.message, true);
+      }
+    }
+
+    resultsEl.addEventListener("click", (ev) => {
+      const save = ev.target.closest(".letter-save");
+      if (save) { saveLetter(save.dataset.job); return; }
+      const btn = ev.target.closest(".assess-btn");
+      if (btn) (btn.dataset.act === "letter" ? draftLetter : assess)(btn);
+    });
+    resultsEl.addEventListener("change", (ev) => {
+      const sel = ev.target.closest(".status-sel");
+      if (sel) trackStatus(sel.dataset.job, sel.value);
+    });
+
+    // Single source of truth for a status change. Updates the DB, then reflects the
+    // change in BOTH the shortlist and the board so the two views stay in sync.
+    async function trackStatus(jobId, status) {
       try {
         if (!status) {
           await fetch(`/applications/${jobId}`, { method: "DELETE" });
         } else {
           const res = await fetch("/applications", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ job_id: Number(jobId), status }),
           });
           if (!res.ok) throw new Error("HTTP " + res.status);
         }
-        refreshStats();
       } catch (e) {
         setStatus("Could not update status: " + e.message, true);
+        return;
       }
+      // Reflect on the shortlist (data + the card's dropdown, if it's showing this job).
+      if (lastResults) {
+        const it = lastResults.items.find((j) => String(j.id) === String(jobId));
+        if (it) it.application_status = status || null;
+      }
+      const sel = document.querySelector(`.status-sel[data-job="${jobId}"]`);
+      if (sel && sel.value !== (status || "")) sel.value = status || "";
+      // Reflect on the board (re-render it whether or not it's the visible tab).
+      await loadBoard();
+      refreshStats();
     }
 
-    resultsEl.addEventListener("change", (ev) => {
-      const sel = ev.target.closest(".status-sel");
-      if (sel) trackStatus(sel);
+    /* ---------------- Applications board ---------------- */
+    async function fetchStats() {
+      try { return await (await fetch("/applications/stats")).json(); }
+      catch { return { total: 0, by_status: {} }; }
+    }
+
+    async function refreshStats() {
+      const s = await fetchStats();
+      $("tabCount").textContent = s.total || "";
+      const parts = Object.entries(s.by_status || {}).filter(([, n]) => n > 0).map(([k, n]) => `${k}: ${n}`);
+      $("pipeline").textContent = s.total ? "Pipeline - " + parts.join("  ·  ") : "";
+    }
+
+    function appCard(app) {
+      const job = app.job || {};
+      const bits = [];
+      bits.push(esc(locationText(job)));
+      const sal = fmtSalary(job);
+      if (sal) bits.push(esc(sal));
+      if (app.applied_at) bits.push("applied " + esc(fmtDate(app.applied_at)));
+      return `
+        <div class="appcard" draggable="true" data-job="${job.id}" data-status="${esc(app.status)}">
+          <button class="rm" data-job="${job.id}" title="Untrack">&times;</button>
+          <div class="t"><a href="${esc(job.url)}" target="_blank" rel="noopener">${esc(job.title)}</a></div>
+          <div class="c">${esc(job.company)} <span class="jobid">#${job.id}</span></div>
+          <div class="m">${bits.map((b) => `<span>${b}</span>`).join("")}</div>
+          <select class="appstatus" data-job="${job.id}" draggable="false" title="Change stage">
+            ${STATUSES.map((st) => `<option value="${st}"${st === app.status ? " selected" : ""}>${st}</option>`).join("")}
+          </select>
+        </div>`;
+    }
+
+    function renderBoard(apps) {
+      const byStatus = Object.fromEntries(STAGES.map((s) => [s.key, []]));
+      apps.forEach((a) => { (byStatus[a.status] || (byStatus[a.status] = [])).push(a); });
+      $("board").innerHTML = STAGES.map((s) => {
+        const items = byStatus[s.key] || [];
+        const cards = items.length
+          ? items.map(appCard).join("")
+          : '<div class="col-empty">- empty -</div>';
+        return `
+          <div class="col" data-status="${s.key}">
+            <div class="col-head">
+              <span class="swatch" style="background:${s.color}"></span>
+              <span class="name">${s.key}</span>
+              <span class="cnt">${items.length}</span>
+            </div>
+            <div class="col-body">${cards}</div>
+          </div>`;
+      }).join("");
+      const total = apps.length;
+      $("boardSummary").textContent = total
+        ? `${total} tracked application${total === 1 ? "" : "s"}`
+        : "No applications tracked yet - add some from the Shortlist tab.";
+    }
+
+    async function loadBoard() {
+      $("board").innerHTML = '<div class="empty">Loading applications...</div>';
+      try {
+        const apps = await (await fetch("/applications")).json();
+        renderBoard(apps);
+      } catch (e) {
+        $("board").innerHTML = `<div class="empty">Could not load applications: ${esc(e.message)}</div>`;
+      }
+      refreshStats();
+    }
+
+    // Drag & drop between columns.
+    let dragJob = null, dragFrom = null;
+    const board = $("board");
+    board.addEventListener("dragstart", (e) => {
+      // Let the native status dropdown / remove button work without starting a drag.
+      if (e.target.closest(".appstatus") || e.target.closest(".rm")) { e.preventDefault(); return; }
+      const c = e.target.closest(".appcard");
+      if (!c) return;
+      dragJob = c.dataset.job; dragFrom = c.dataset.status;
+      c.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
     });
+    board.addEventListener("dragend", (e) => {
+      const c = e.target.closest(".appcard");
+      if (c) c.classList.remove("dragging");
+      board.querySelectorAll(".col.drag-over").forEach((col) => col.classList.remove("drag-over"));
+    });
+    board.addEventListener("dragover", (e) => {
+      const col = e.target.closest(".col");
+      if (!col) return;
+      e.preventDefault();
+      board.querySelectorAll(".col.drag-over").forEach((c) => { if (c !== col) c.classList.remove("drag-over"); });
+      col.classList.add("drag-over");
+    });
+    board.addEventListener("drop", async (e) => {
+      const col = e.target.closest(".col");
+      if (!col || !dragJob) return;
+      e.preventDefault();
+      const target = col.dataset.status;
+      col.classList.remove("drag-over");
+      if (target && target !== dragFrom) await trackStatus(dragJob, target);
+      dragJob = dragFrom = null;
+    });
+    board.addEventListener("click", (e) => {
+      const rm = e.target.closest(".rm");
+      if (rm) trackStatus(rm.dataset.job, ""); // untrack -> syncs both views
+    });
+    board.addEventListener("change", (e) => {
+      const sel = e.target.closest(".appstatus");
+      if (sel) trackStatus(sel.dataset.job, sel.value); // syncs both views
+    });
+    $("boardRefresh").addEventListener("click", loadBoard);
+
+    /* ---------------- Init ---------------- */
+    // Export the current shortlist (no server round-trip; works for any size loaded).
+    function downloadFile(name, text, type) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type }));
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    function toCsv(items) {
+      const cols = ["rank", "id", "title", "company", "location", "url", "similarity", "source",
+        "language", "salary_min", "salary_max", "salary_currency", "min_years_experience",
+        "remote_region", "visa_sponsorship", "timezone_overlap_hours", "posted_at", "application_status"];
+      const cell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const rows = items.map((j, i) => [i + 1, j.id, j.title, j.company, locationText(j), j.url,
+        j.similarity, j.source, j.language, j.salary_min, j.salary_max, j.salary_currency,
+        j.min_years_experience, j.remote_region, j.visa_sponsorship, j.timezone_overlap_hours,
+        j.posted_at, j.application_status].map(cell).join(","));
+      return [cols.join(","), ...rows].join("\r\n");
+    }
+    function toTxt(items) {
+      return items.map((j, i) => {
+        const sal = fmtSalary(j);
+        return `#${i + 1}  ${j.title} — ${j.company} (${locationText(j)})  [id ${j.id}]\n` +
+          `    ${j.url}\n` +
+          `    fit ${j.similarity}${sal ? " | " + sal : ""}${j.min_years_experience != null ? " | " + j.min_years_experience + "+ yrs" : ""}` +
+          `${j.application_status ? " | " + j.application_status : ""}`;
+      }).join("\n\n");
+    }
+    // PDF via the browser's print-to-PDF (no library): open a clean printable page.
+    function downloadPdf(items, cvId) {
+      const rows = items.map((j, i) => {
+        const sal = fmtSalary(j);
+        const bits = [`fit ${j.similarity}`, `id ${j.id}`, j.source];
+        if (sal) bits.push(sal);
+        if (j.application_status) bits.push(j.application_status);
+        return `<div class="row"><div class="h">#${i + 1}. ${esc(j.title)}</div>
+          <div class="c">${esc(j.company)} &middot; ${esc(locationText(j))}</div>
+          <div class="u">${esc(j.url)}</div>
+          <div class="m">${esc(bits.join("  |  "))}</div></div>`;
+      }).join("");
+      const w = window.open("", "_blank");
+      if (!w) { setStatus("Allow pop-ups to export PDF.", true); return; }
+      w.document.write(
+        `<!doctype html><html><head><meta charset="utf-8"><title>Shortlist CV ${cvId}</title>
+        <style>body{font:13px/1.5 system-ui,Segoe UI,Roboto,sans-serif;color:#111;padding:28px;max-width:720px}
+        h1{font-size:18px;margin:0 0 4px}.sub{color:#666;margin:0 0 18px;font-size:12px}
+        .row{margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid #eee}
+        .h{font-weight:600}.c{color:#444}.u{color:#06c;font-size:11px;word-break:break-all}
+        .m{color:#777;font-size:11px;margin-top:2px}</style></head>
+        <body><h1>Job Shortlist</h1><p class="sub">CV #${cvId} &middot; ${items.length} matches &middot; ranked by fit x freshness</p>
+        ${rows}</body></html>`
+      );
+      w.document.close();
+      w.focus();
+      w.print();
+    }
+
+    $("dlCsv").addEventListener("click", () => {
+      if (lastResults) downloadFile(`shortlist-cv${lastResults.cv_id}.csv`, toCsv(lastResults.items), "text/csv");
+    });
+    $("dlTxt").addEventListener("click", () => {
+      if (lastResults) downloadFile(`shortlist-cv${lastResults.cv_id}.txt`, toTxt(lastResults.items), "text/plain");
+    });
+    $("dlPdf").addEventListener("click", () => {
+      if (lastResults) downloadPdf(lastResults.items, lastResults.cv_id);
+    });
+
+    // Retrieve-then-rerank: batch-judge the top jobs and re-order by the judge's score.
+    const RERANK_N = 10;
+    async function rerankWithAI(btn) {
+      if (!lastResults || !lastResults.items.length) return;
+      const ids = lastResults.items.slice(0, RERANK_N).map((j) => j.id);
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.textContent = `Judging ${ids.length}...`;
+      setStatus(`Asking the AI judge to score the top ${ids.length} (${ids.length} model calls, ~a few cents)...`);
+      try {
+        const res = await fetch("/match/rerank", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cv_id: Number($("cv").value) || null, job_ids: ids }),
+        });
+        if (!res.ok) {
+          let detail = "HTTP " + res.status;
+          try { detail = (await res.json()).detail || detail; } catch {}
+          throw new Error(detail);
+        }
+        (await res.json()).forEach((v) => { judged[v.job_id] = v; });
+        // Judged jobs first (by score desc); the rest keep their fit order.
+        lastResults.items.sort((a, b) => {
+          const sa = judged[a.id]?.overall_score, sb = judged[b.id]?.overall_score;
+          if (sa != null && sb != null) return sb - sa;
+          if (sa != null) return -1;
+          if (sb != null) return 1;
+          return 0;
+        });
+        renderResults(lastResults);
+        setStatus(`Reranked the top ${Object.keys(judged).length} by the AI judge's 0-100 score.`);
+      } catch (e) {
+        setStatus("Rerank failed: " + e.message, true);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    }
+    $("rerank").addEventListener("click", () => rerankWithAI($("rerank")));
+
+    // Account modal. Accounts are optional; real auth is on the deploy roadmap, so
+    // the submit is a friendly stub for now. The sliding toggle mirrors forsaprop's.
+    let authMode = "signup";
+    function setAuthMode(mode) {
+      authMode = mode;
+      document.querySelectorAll("#authToggle .seg-btn").forEach((b) =>
+        b.classList.toggle("active", b.dataset.mode === mode));
+      $("authSlider").style.transform = mode === "login" ? "translateX(calc(100% + 4px))" : "translateX(0)";
+      $("authSubmit").textContent = mode === "login" ? "Log in" : "Sign up";
+      $("authMsg").textContent = "";
+    }
+    function closeAuth() { $("authModal").style.display = "none"; localStorage.setItem("authDismissed", "1"); }
+    document.querySelectorAll("#authToggle .seg-btn").forEach((b) =>
+      b.addEventListener("click", () => setAuthMode(b.dataset.mode)));
+    $("authClose").addEventListener("click", closeAuth);
+    $("authSkip").addEventListener("click", closeAuth);
+    $("authOpen").addEventListener("click", () => { $("authModal").style.display = "flex"; });
+    $("authModal").addEventListener("click", (e) => { if (e.target === $("authModal")) closeAuth(); });
+    $("authForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      $("authMsg").textContent =
+        "Thanks! Accounts aren't enabled in this preview yet - your data stays in this browser for now.";
+    });
+    // Greet once (until dismissed), a beat after load so it doesn't block the shortlist.
+    if (!localStorage.getItem("authDismissed")) setTimeout(() => { $("authModal").style.display = "flex"; }, 500);
 
     $("upload").addEventListener("submit", uploadCv);
     $("controls").addEventListener("submit", runShortlist);
     applyUrlToForm();
-    loadCvs().then(runShortlist);
+    loadLanguages();
+    loadTimezones();
+    Promise.all([loadCvs(), loadPrefs()]).then(runShortlist);
     refreshStats();
+    if (new URLSearchParams(location.search).get("view") === "board") showView("board");
   </script>
 </body>
 </html>
