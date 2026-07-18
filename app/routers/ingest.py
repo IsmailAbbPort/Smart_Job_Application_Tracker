@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_session
+from app.ingest.liveness import prune_dead_jobs
 from app.ingest.runner import SOURCES, backfill_enrichment, ingest_all, ingest_source
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -29,6 +30,20 @@ def trigger_backfill(
 ) -> dict:
     """Recompute derived signals (language + eligibility) for pre-existing jobs."""
     return backfill_enrichment(session, limit=limit, force=force)
+
+
+@router.post("/prune-dead")
+def trigger_prune_dead(
+    session: Session = Depends(get_session),
+    apply: bool = Query(default=False, description="Actually delete dead jobs (default: dry run)"),
+    limit: int = Query(default=200, ge=1, le=5000, description="Max jobs to check this call"),
+) -> dict:
+    """Check job URLs and report (or with apply=true, remove) dead 404/410 listings.
+
+    Manual + dry-run by default. Tracked jobs (with an Application) are never pruned.
+    Scheduling a daily run is deferred to the scheduled-ingest work.
+    """
+    return prune_dead_jobs(session, limit=limit, apply=apply)
 
 
 @router.post("/{source}")
