@@ -202,6 +202,14 @@ Each phase ends with something that works and is committed. Don't build the whol
 - Deploy (frontend on Vercel/Netlify, API+DB on Railway/Fly/Render). Observability (structured logs, LLM call tracing, cost counter). Error handling on every source/LLM call. `SCRAPING_POLICY.md`, architecture doc, and a README that opens with the **dogfood metrics** (jobs ingested, applications sent, interviews) and the EU AI Act note.
 - Deliverable: live demo link + a README that tells the story.
 
+**Phase 7a — Security & auth (gate before any public deploy).** The API is currently open: anyone could POST a CV, trigger ingest, run the (paid) judge, or read the pipeline. Before it faces the internet:
+  - **Authentication.** Single-user, so keep it simple: a required auth token (env secret) checked by a FastAPI dependency on every non-health route, or HTTP Basic behind the reverse proxy. No user table needed. The demo can be read-only-public + write-authed, or fully gated behind a login.
+  - **Protect the expensive/write paths first:** `POST /cv`, `/cv/upload`, `/ingest/*`, `/match/embed-jobs`, `POST /match/{id}` (spends OpenAI/Anthropic tokens), and all `/applications` writes. A public read-only demo (shortlist view) is fine; mutations must be authed.
+  - **Abuse limits:** rate-limit per IP (slowapi or proxy-level), cap upload size on `/cv/upload`, and cap `limit`/pagination (already bounded). Keep the per-source ingest TTL as scraping politeness.
+  - **Secrets & transport:** keys only via env (already), HTTPS only, CORS locked to the frontend origin, security headers. Never log CV text or keys.
+  - **Data:** the CV is personal data - document retention/delete, and that it's the user's own data (reinforces the EU AI Act "data subject = user" framing).
+  - Deliverable: an auth dependency + a short `SECURITY.md` describing the model. This is itself a hiring signal (shows you don't ship an open write API).
+
 ### B3. Scope discipline (what to say no to)
 - No LinkedIn/Indeed scraping. State why in the README (turns a limitation into a judgement signal).
 - No auto-apply. Human-in-the-loop is a feature, not a gap.
