@@ -22,6 +22,24 @@ def test_greenhouse_parse():
     assert jobs[1].is_remote is False
 
 
+def test_greenhouse_prefers_curated_company_over_board_name():
+    # Remote.com's board reports company_name "Remote"; our curated name must win
+    # so it doesn't collide with the work-arrangement.
+    payload = {
+        "jobs": [
+            {
+                "id": 9,
+                "title": "Accountant",
+                "company_name": "Remote",
+                "absolute_url": "u",
+                "location": {"name": "Remote"},
+            }
+        ]
+    }
+    jobs = greenhouse.parse(payload, slug="remotecom", company="Remote.com")
+    assert jobs[0].company == "Remote.com"
+
+
 def test_lever_parse_remote_flag_and_epoch():
     jobs = lever.parse(load_fixture("lever.json"), slug="mistral", company="Mistral AI")
     assert len(jobs) == 2

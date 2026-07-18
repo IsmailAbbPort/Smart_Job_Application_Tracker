@@ -25,6 +25,9 @@ _SALARY_RE = re.compile(
 )
 
 _MIN_PLAUSIBLE_SALARY = 1000  # below this it's an hourly rate or noise, not a salary
+# A magnitude suffix right after the amount means it's funding/valuation, not pay
+# (e.g. "$781M raised", "$11B valuation"), so that match is skipped.
+_MAGNITUDE = re.compile(r"^\s*(?:m|bn|b|k?m|million|billion)\b", re.IGNORECASE)
 
 
 def _to_int(number: str, is_k: bool) -> int:
@@ -35,22 +38,26 @@ def _to_int(number: str, is_k: bool) -> int:
 
 
 def extract_salary(text: str | None) -> tuple[int | None, int | None, str | None]:
-    """Return (salary_min, salary_max, currency) or (None, None, None) if unclear."""
+    """Return (salary_min, salary_max, currency), or (None, None, None) if unclear.
+
+    Scans all currency-anchored amounts and returns the first *plausible* pay figure,
+    skipping funding/valuation ("$781M") and hourly-rate ("$40") amounts. Scanning
+    (not just the first match) matters: postings often mention funding before pay.
+    """
     if not text:
         return None, None, None
-    match = _SALARY_RE.search(text)
-    if not match:
-        return None, None, None
-
-    low = _to_int(match["n1"], bool(match["k1"]))
-    high = _to_int(match["n2"], bool(match["k2"])) if match["n2"] else low
-    if high < low:
-        low, high = high, low
-    if high < _MIN_PLAUSIBLE_SALARY:  # probably an hourly rate; don't misreport it
-        return None, None, None
-
-    cur = _CURRENCY.get(match["cur"].lower(), _CURRENCY.get(match["cur"]))
-    return low, high, cur
+    for match in _SALARY_RE.finditer(text):
+        if _MAGNITUDE.match(text[match.end() : match.end() + 12]):
+            continue  # funding/valuation, not a salary
+        low = _to_int(match["n1"], bool(match["k1"]))
+        high = _to_int(match["n2"], bool(match["k2"])) if match["n2"] else low
+        if high < low:
+            low, high = high, low
+        if high < _MIN_PLAUSIBLE_SALARY:  # hourly rate or noise
+            continue
+        cur = _CURRENCY.get(match["cur"].lower(), _CURRENCY.get(match["cur"]))
+        return low, high, cur
+    return None, None, None
 
 
 _EFFORT_PATTERNS: dict[str, re.Pattern[str]] = {

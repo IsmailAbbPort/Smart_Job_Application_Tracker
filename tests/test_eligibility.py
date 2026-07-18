@@ -35,6 +35,10 @@ def test_detect_visa_sponsorship():
     assert detect_visa_sponsorship("We are unable to sponsor visas.") is False
     assert detect_visa_sponsorship("You must already be authorized to work here.") is False
     assert detect_visa_sponsorship("Nothing about visas here.") is None
+    # A refusal is the operative constraint even when an offer is also mentioned.
+    assert (
+        detect_visa_sponsorship("We can sponsor visas, but no sponsorship for this role.") is False
+    )
 
 
 def test_detect_remote_region():
@@ -48,10 +52,17 @@ def test_timezone_extraction_and_overlap():
     assert extract_required_utc_offsets("Must work CET hours.") == [1]
     assert extract_required_utc_offsets("Overlap with PST.") == [-8]
     assert extract_required_utc_offsets("Distributed, async.") == []
+    assert extract_required_utc_offsets("Pacific time zone required.") == [-8]  # phrase
     # Cairo (+2): great overlap with CET (+1), none with Pacific (-8).
     assert timezone_overlap_hours([1], 2) == 7
     assert timezone_overlap_hours([-8], 2) == 0
     assert timezone_overlap_hours([], 2) is None  # unknown requirement -> neutral
+
+
+def test_timezone_ignores_lowercase_foreign_words():
+    # Abbreviations must be UPPERCASE: German "ist" / French "est"/"cet" are not tz.
+    assert extract_required_utc_offsets("Das Team ist komplett remote.") == []
+    assert extract_required_utc_offsets("Le poste est ouvert dans cet environnement.") == []
 
 
 # --- filters ---

@@ -86,34 +86,38 @@ def detect_remote_region(text: str | None, *, is_remote: bool) -> str | None:
 
 # --- timezone requirement ---------------------------------------------------
 
-# Timezone tokens -> representative UTC offset (winter/standard). Enough to score
-# working-hours overlap; DST precision is not worth the complexity here.
-_TZ_OFFSETS: dict[str, int] = {
-    "cet": 1,
-    "cest": 1,
+# Timezone ABBREVIATIONS -> representative UTC offset. Matched CASE-SENSITIVELY on
+# the original text: real postings write "CET"/"EST" in uppercase, whereas the
+# lowercase forms collide with common non-English words ("ist" = German "is",
+# "est"/"cet" = French), which produced large false-positive rates in the corpus.
+_TZ_ABBR: dict[str, int] = {
+    "CET": 1,
+    "CEST": 1,
+    "EET": 2,
+    "EEST": 2,
+    "GMT": 0,
+    "UTC": 0,
+    "BST": 0,
+    "WET": 0,
+    "EST": -5,
+    "EDT": -5,
+    "CST": -6,
+    "CDT": -6,
+    "MST": -7,
+    "MDT": -7,
+    "PST": -8,
+    "PDT": -8,
+    "IST": 5,
+}
+# Multi-word timezone PHRASES are unambiguous, so matched case-insensitively.
+_TZ_PHRASE: dict[str, int] = {
     "central european": 1,
-    "european time": 1,
-    "eet": 2,
     "eastern european": 2,
-    "gmt": 0,
-    "utc": 0,
-    "bst": 0,
-    "uk time": 0,
-    "est": -5,
-    "edt": -5,
     "eastern time": -5,
-    "cst": -6,
-    "cdt": -6,
     "central time": -6,
-    "us time": -6,
-    "us hours": -6,
-    "north american": -6,
-    "mst": -7,
     "mountain time": -7,
-    "pst": -8,
-    "pdt": -8,
     "pacific time": -8,
-    "ist": 5,
+    "uk time": 0,
 }
 
 
@@ -121,11 +125,13 @@ def extract_required_utc_offsets(text: str | None) -> list[int]:
     """UTC offsets the posting's working-hours requirement implies (sorted, unique)."""
     if not text:
         return []
-    lower = text.lower()
     offsets: set[int] = set()
-    for token, offset in _TZ_OFFSETS.items():
-        # Word-boundary match so "ist" doesn't fire inside "assist", etc.
-        if re.search(rf"\b{re.escape(token)}\b", lower):
+    for abbr, offset in _TZ_ABBR.items():
+        if re.search(rf"\b{abbr}\b", text):  # case-sensitive on the original text
+            offsets.add(offset)
+    lower = text.lower()
+    for phrase, offset in _TZ_PHRASE.items():
+        if phrase in lower:
             offsets.add(offset)
     return sorted(offsets)
 

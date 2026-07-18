@@ -30,7 +30,10 @@ def parse(payload: dict, *, slug: str, company: str) -> list[CanonicalJob]:
                 source=NAME,
                 source_id=f"{slug}:{j['id']}",
                 title=j.get("title", "").strip(),
-                company=j.get("company_name") or company,
+                # Prefer our curated target name over the board's self-reported
+                # company_name: Remote.com reports itself as just "Remote", which
+                # collides with the work-arrangement. The YAML is our source of truth.
+                company=company or j.get("company_name"),
                 url=j.get("absolute_url", ""),
                 description=html_to_text(j.get("content")),
                 location=loc,
