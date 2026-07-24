@@ -34,6 +34,13 @@ def test_extract_min_years_experience():
     assert extract_min_years_experience("Experience: 6+ years in backend roles") == 6
     assert extract_min_years_experience("2–4 years of administrative experience") == 2
     assert extract_min_years_experience("5+ years of Product Management experience") == 5
+    # Spelled out with a parenthetical numeral: "seven (7) years of experience".
+    assert (
+        extract_min_years_experience(
+            "At least seven (7) years of experience as a software engineer"
+        )
+        == 7
+    )
     # Not a requirement.
     assert extract_min_years_experience("Founded 10 years ago.") is None
     assert extract_min_years_experience("No experience required.") is None

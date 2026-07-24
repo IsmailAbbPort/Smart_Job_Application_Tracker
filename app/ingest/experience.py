@@ -15,14 +15,15 @@ _MAX_SANE_YEARS = 30  # anything larger is almost certainly not an experience ba
 # "N years ... experience" within a short span (of/in optional), e.g.
 # "5 years of experience", "3+ years' engineering experience", or the reverse
 # "experience: 5+ years". The window (35 chars) covers "years of <domain> experience".
+# `\)?` after the number handles the "seven (7) years" spelled-out-then-numeral form.
 _EXP_NEAR = re.compile(
-    r"(\d{1,2})\s*(?:\+|-|–|to)?\s*(?:\d{1,2})?\s*years?['’]?\s*"
+    r"(\d{1,2})\)?\s*(?:\+|-|–|to)?\s*(?:\d{1,2})?\s*years?['’]?\s*"
     r"(?:of\s+|in\s+)?[\w/&,. -]{0,35}?experience"
-    r"|experience[\w/&,.:'’ -]{0,20}?(\d{1,2})\s*\+?\s*years?",
+    r"|experience[\w/&,.:'’ -]{0,20}?(\d{1,2})\)?\s*\+?\s*years?",
     re.IGNORECASE,
 )
 # "N+ years" - the explicit plus signals a requirement even without "experience".
-_EXP_PLUS = re.compile(r"(\d{1,2})\s*\+\s*years?", re.IGNORECASE)
+_EXP_PLUS = re.compile(r"(\d{1,2})\)?\s*\+\s*years?", re.IGNORECASE)
 _AGO = re.compile(r"\bago\b", re.IGNORECASE)
 
 
