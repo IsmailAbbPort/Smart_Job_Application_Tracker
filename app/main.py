@@ -43,8 +43,12 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", include_in_schema=False)
 def ui() -> FileResponse:
-    """Serve the shortlist viewer (single-page frontend)."""
-    return FileResponse(STATIC_DIR / "index.html")
+    """Serve the shortlist viewer (single-page frontend).
+
+    no-cache so the browser always revalidates the SPA; otherwise a cached page
+    keeps showing old markup/JS after a redeploy.
+    """
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health", tags=["ops"])
