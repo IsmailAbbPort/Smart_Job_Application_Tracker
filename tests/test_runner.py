@@ -47,6 +47,22 @@ def test_reingest_applies_field_changes(session, monkeypatch):
     assert row.title_norm == "staff engineer"
 
 
+def test_duplicate_source_id_in_one_fetch_is_deduped(session, monkeypatch):
+    # A source that lists the same posting twice must not violate the unique
+    # constraint on commit (regression: arbeitnow returns in-batch duplicates).
+    jobs = [
+        make_canonical(source_id="dup", title="Engineer"),
+        make_canonical(source_id="dup", title="Engineer (repost)"),
+        make_canonical(source_id="unique"),
+    ]
+    monkeypatch.setitem(runner.SOURCES, "fake", FakeSource("fake", jobs))
+
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.error is None  # would have been an IntegrityError before the fix
+    assert stats.inserted == 2 and stats.deduped == 1
+    assert _count(session) == 2  # the in-batch repeat collapsed, not committed twice
+
+
 def test_cross_source_dedup(session, monkeypatch):
     same = dict(title="Senior Backend Engineer", company="GitLab", location="Remote, Germany")
     monkeypatch.setitem(

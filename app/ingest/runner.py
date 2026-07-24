@@ -124,7 +124,16 @@ def _apply_derived(job: Job) -> None:
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:
     """Upsert a batch, tracking insert/update/dedup counts."""
+    # A single fetch can list the same posting twice (source_id repeated). The session
+    # doesn't autoflush, so a duplicate wouldn't be seen by the existing-row query below
+    # until commit, where it would violate uq_job_source_sourceid and roll back the whole
+    # batch. Collapse in-batch duplicates up front (first occurrence wins).
+    seen_ids: set[str] = set()
     for cj in jobs:
+        if cj.source_id in seen_ids:
+            stats.deduped += 1
+            continue
+        seen_ids.add(cj.source_id)
         existing = session.scalar(
             select(Job).where(Job.source == source, Job.source_id == cj.source_id)
         )
