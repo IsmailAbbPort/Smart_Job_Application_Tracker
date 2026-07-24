@@ -47,6 +47,7 @@ def parse(payload: list, *, slug: str, company: str) -> list[CanonicalJob]:
 class LeverSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
+    full_catalog = True
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []

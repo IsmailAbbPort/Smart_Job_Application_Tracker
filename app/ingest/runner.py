@@ -39,7 +39,7 @@ from app.ingest.sources.ashby import AshbySource
 from app.ingest.sources.greenhouse import GreenhouseSource
 from app.ingest.sources.lever import LeverSource
 from app.ingest.sources.remotive import RemotiveSource
-from app.models import Job
+from app.models import Application, Job
 
 # The source registry. Adding a source = adding one line here.
 SOURCES: dict[str, Source] = {
@@ -64,6 +64,7 @@ class IngestStats:
     inserted: int = 0
     updated: int = 0
     deduped: int = 0  # dropped as a cross-source duplicate
+    removed_stale: int = 0  # deleted: gone from a full-catalogue source's feed
     skipped_throttled: bool = False
     error: str | None = None
 
@@ -81,6 +82,7 @@ class IngestSummary:
             "inserted": sum(r.inserted for r in self.results),
             "updated": sum(r.updated for r in self.results),
             "deduped": sum(r.deduped for r in self.results),
+            "removed_stale": sum(r.removed_stale for r in self.results),
         }
         return {"totals": totals, "sources": [r.as_dict() for r in self.results]}
 
@@ -157,6 +159,29 @@ def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: Ing
         stats.inserted += 1
 
 
+def _sweep_stale(session: Session, source: str, fetched_ids: list[str], stats: IngestStats) -> None:
+    """Delete stored jobs of a full-catalogue source that vanished from its feed.
+
+    Reliable removal for ATS boards (which serve a complete per-company list, and
+    return HTTP 200 even for deleted postings, so a URL check can't tell). Scoped
+    conservatively: only prunes within companies (source_id slug prefixes) that
+    actually appeared in this fetch, so a company whose board failed or was skipped
+    is left untouched. Jobs with a tracked Application are never removed. Does
+    nothing on an empty fetch (a total failure must not wipe the corpus).
+    """
+    fetched = set(fetched_ids)
+    if not fetched:
+        return
+    seen_slugs = {sid.split(":", 1)[0] for sid in fetched}
+    tracked = set(session.scalars(select(Application.job_id)))
+    for job in session.scalars(select(Job).where(Job.source == source)):
+        slug = job.source_id.split(":", 1)[0]
+        if slug not in seen_slugs or job.source_id in fetched or job.id in tracked:
+            continue
+        session.delete(job)
+        stats.removed_stale += 1
+
+
 def ingest_source(
     session: Session,
     name: str,
@@ -182,6 +207,9 @@ def ingest_source(
         jobs = source.fetch(client, session)
         stats.fetched = len(jobs)
         _persist(session, name, jobs, stats)
+        # For full-catalogue sources, remove postings that dropped out of the feed.
+        if getattr(source, "full_catalog", False):
+            _sweep_stale(session, name, [cj.source_id for cj in jobs], stats)
         cache.record_fetch(session, name, status="ok", count=len(jobs))
         session.commit()
     except Exception as exc:  # noqa: BLE001 - surface any source failure as stats

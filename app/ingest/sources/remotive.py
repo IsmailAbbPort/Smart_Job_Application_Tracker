@@ -42,6 +42,7 @@ def parse(payload: dict) -> list[CanonicalJob]:
 class RemotiveSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
+    full_catalog = False
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         resp = client.get(_BASE)

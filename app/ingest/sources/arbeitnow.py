@@ -41,6 +41,7 @@ def parse(payload: dict) -> list[CanonicalJob]:
 class ArbeitnowSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
+    full_catalog = False
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []

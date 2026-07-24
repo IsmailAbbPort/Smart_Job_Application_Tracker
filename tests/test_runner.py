@@ -5,8 +5,15 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from app.ingest import runner
-from app.models import Job
+from app.models import Application, Job
 from tests.conftest import BrokenSource, FakeSource, make_canonical
+
+
+def _catalog_source(name, jobs) -> FakeSource:
+    src = FakeSource(name, jobs)
+    src.full_catalog = True  # ATS-style: fetch returns the complete current list
+    return src
+
 
 _DUMMY_CLIENT = object()  # FakeSource.fetch ignores the client
 
@@ -30,6 +37,78 @@ def test_insert_then_reingest_updates(session, monkeypatch):
     # Re-poll: same (source, source_id) pairs -> updates, no new rows.
     second = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
     assert (second.inserted, second.updated) == (0, 2)
+    assert _count(session) == 2
+
+
+def test_full_catalog_source_sweeps_removed_jobs(session, monkeypatch):
+    # A full-catalogue (ATS) source: a posting missing from a later fetch is gone.
+    monkeypatch.setitem(
+        runner.SOURCES,
+        "fake",
+        _catalog_source(
+            "fake", [make_canonical(source_id="acme:1"), make_canonical(source_id="acme:2")]
+        ),
+    )
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert _count(session) == 2
+
+    monkeypatch.setitem(
+        runner.SOURCES, "fake", _catalog_source("fake", [make_canonical(source_id="acme:2")])
+    )
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 1
+    assert {j.source_id for j in session.scalars(select(Job))} == {"acme:2"}
+
+
+def test_rolling_source_does_not_sweep(session, monkeypatch):
+    # A rolling-window source (full_catalog False) must NOT delete jobs that fall
+    # out of the window - they may just be older, not removed.
+    monkeypatch.setitem(
+        runner.SOURCES,
+        "fake",
+        FakeSource("fake", [make_canonical(source_id="a"), make_canonical(source_id="b")]),
+    )
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    monkeypatch.setitem(runner.SOURCES, "fake", FakeSource("fake", [make_canonical(source_id="a")]))
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 0
+    assert _count(session) == 2
+
+
+def test_sweep_skips_companies_absent_from_fetch(session, monkeypatch):
+    # If a company's board fails/returns nothing, its slug is absent and its jobs
+    # must be left alone (don't wipe a company on a transient failure).
+    monkeypatch.setitem(
+        runner.SOURCES,
+        "fake",
+        _catalog_source(
+            "fake", [make_canonical(source_id="acme:1"), make_canonical(source_id="beta:1")]
+        ),
+    )
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    monkeypatch.setitem(
+        runner.SOURCES, "fake", _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    )
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 0  # beta absent from the fetch -> not swept
+    assert _count(session) == 2
+
+
+def test_sweep_spares_tracked_jobs(session, monkeypatch):
+    monkeypatch.setitem(
+        runner.SOURCES, "fake", _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    )
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    job = session.scalar(select(Job).where(Job.source_id == "acme:1"))
+    session.add(Application(job_id=job.id, status="applied"))
+    session.commit()
+
+    # acme:1 drops from the feed, but the company is still present (acme:2).
+    monkeypatch.setitem(
+        runner.SOURCES, "fake", _catalog_source("fake", [make_canonical(source_id="acme:2")])
+    )
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 0  # tracked application is never pruned
     assert _count(session) == 2
 
 
