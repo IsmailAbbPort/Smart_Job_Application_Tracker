@@ -32,8 +32,17 @@ def update_preferences(
                 if cleaned:
                     seen.setdefault(cleaned.lower(), cleaned)
             value = list(seen.values())
-        # Language codes and region codes are stored lowercased + de-duplicated.
-        elif field in ("known_languages", "exclude_remote_regions") and value is not None:
+        # Codes / keywords are stored lowercased, trimmed, and de-duplicated.
+        elif (
+            field
+            in (
+                "known_languages",
+                "exclude_remote_regions",
+                "exclude_seniorities",
+                "exclude_title_keywords",
+            )
+            and value is not None
+        ):
             value = sorted({item.strip().lower() for item in value if item.strip()})
         # A non-positive max age means "no cutoff" (store null).
         elif field == "max_age_days" and value is not None and value <= 0:

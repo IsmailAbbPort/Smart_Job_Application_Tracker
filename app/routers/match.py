@@ -160,9 +160,15 @@ def shortlist(
     lo, hi = (min(sims), max(sims)) if sims else (0.0, 1.0)
     span = hi - lo
 
+    # Languages the user speaks -> drop jobs requiring one they don't (hard filter).
+    # In Python (not SQL) because required_languages is a JSON array. Empty = off.
+    known_langs = {c.strip().lower() for c in (prefs.known_languages or []) if c.strip()}
+
     now = datetime.now(UTC)
     scored = []  # (job, similarity, recency, overlap, gap, rank_score)
     for job, similarity in ranked:
+        if known_langs and set(job.required_languages or []) - known_langs:
+            continue  # requires a language the user doesn't have
         # Timezone-overlap eligibility (see prefs.py: done here, not in SQL).
         overlap = timezone_overlap_hours(job.required_utc_offsets, prefs.user_utc_offset)
         if (

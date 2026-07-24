@@ -35,6 +35,8 @@ def get_preferences(session: Session) -> SearchPreferences:
             min_salary=None,
             years_experience=None,
             max_experience_gap=None,
+            exclude_seniorities=[],
+            exclude_title_keywords=[],
         )
         session.add(prefs)
         session.commit()
@@ -130,6 +132,17 @@ def preference_filters(
         conditions.append(or_(*keep))
     elif require_salary:
         conditions.append(Job.salary_max.is_not(None))
+
+    # seniority exclude: drop roles whose inferred level is unwanted (unknown kept).
+    excluded_levels = [s.strip().lower() for s in (prefs.exclude_seniorities or []) if s.strip()]
+    if excluded_levels:
+        conditions.append(
+            or_(Job.seniority.is_(None), func.lower(Job.seniority).notin_(excluded_levels))
+        )
+
+    # title blocklist: drop jobs whose title contains any excluded keyword.
+    for kw in [k.strip().lower() for k in (prefs.exclude_title_keywords or []) if k.strip()]:
+        conditions.append(~func.lower(Job.title).contains(kw))
 
     # experience hard cutoff (optional; soft de-ranking is done in the shortlist).
     # Drop jobs that require more than max_experience_gap years beyond the user's.

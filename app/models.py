@@ -80,6 +80,8 @@ class Job(Base):
     effort_signals: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Minimum years of experience the posting requires (entry bar), null if unstated.
     min_years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Coarse seniority inferred from the title: 'intern' | 'senior' | None (mid/junior).
+    seniority: Mapped[str | None] = mapped_column(String(16), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -203,6 +205,11 @@ class SearchPreferences(Base):
     # over that a posting may require before it is dropped (null cutoff = soft only).
     years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_experience_gap: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Seniority levels to drop (e.g. ["senior", "intern"]) and title keywords to
+    # exclude (e.g. ["machine learning", "sales"]). required-language filtering uses
+    # known_languages: a job requiring a language not in that list is dropped.
+    exclude_seniorities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    exclude_title_keywords: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

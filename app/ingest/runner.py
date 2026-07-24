@@ -34,6 +34,7 @@ from app.ingest.normalize import (
     normalize_location,
     normalize_title,
 )
+from app.ingest.seniority import detect_seniority
 from app.ingest.sources.arbeitnow import ArbeitnowSource
 from app.ingest.sources.ashby import AshbySource
 from app.ingest.sources.greenhouse import GreenhouseSource
@@ -122,6 +123,7 @@ def _apply_derived(job: Job) -> None:
     job.salary_min, job.salary_max, job.salary_currency = extract_salary(job.description)
     job.effort_signals = extract_effort_signals(job.description)
     job.min_years_experience = extract_min_years_experience(job.description)
+    job.seniority = detect_seniority(job.title)
 
 
 def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: IngestStats) -> None:

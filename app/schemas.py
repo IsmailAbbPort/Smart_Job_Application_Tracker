@@ -31,6 +31,7 @@ class JobOut(BaseModel):
     salary_currency: str | None = None
     effort_signals: list[str] = Field(default_factory=list)
     min_years_experience: int | None = None
+    seniority: str | None = None
     url: str
     posted_at: datetime | None
     ingested_at: datetime
@@ -276,6 +277,8 @@ class PreferencesOut(BaseModel):
     min_salary: int | None
     years_experience: int | None
     max_experience_gap: int | None
+    exclude_seniorities: list[str]
+    exclude_title_keywords: list[str]
     updated_at: datetime
 
 
@@ -293,3 +296,5 @@ class PreferencesUpdate(BaseModel):
     min_salary: int | None = None
     years_experience: int | None = None
     max_experience_gap: int | None = None
+    exclude_seniorities: list[str] | None = None
+    exclude_title_keywords: list[str] | None = None

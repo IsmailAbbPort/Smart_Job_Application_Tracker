@@ -279,9 +279,13 @@
           <input type="text" id="country" placeholder="e.g. Germany" />
         </div>
         <div class="field">
-          <label for="language">Language</label>
-          <input list="language-list" id="language" placeholder="Any (type to search)" style="min-width: 150px" />
+          <label for="language">Posting language</label>
+          <input list="language-list" id="language" placeholder="Any (type to search)" style="min-width: 130px" />
           <datalist id="language-list"></datalist>
+        </div>
+        <div class="field">
+          <label for="known_langs">You speak</label>
+          <input type="text" id="known_langs" placeholder="e.g. en, fr" style="min-width: 110px" title="Jobs requiring a language you don't list are hidden" />
         </div>
         <div class="field">
           <label for="timezone">Your timezone</label>
@@ -317,6 +321,10 @@
           <input type="number" id="max_gap" min="0" step="1" placeholder="off" style="min-width: 90px" />
         </div>
         <div class="field">
+          <label for="excl_titles">Exclude titles</label>
+          <input type="text" id="excl_titles" placeholder="e.g. sales, machine learning" style="min-width: 170px" />
+        </div>
+        <div class="field">
           <label for="remote">Remote</label>
           <select id="remote">
             <option value="">Any</option>
@@ -327,6 +335,14 @@
         <div class="field check">
           <input type="checkbox" id="europe" />
           <label for="europe">Europe only</label>
+        </div>
+        <div class="field check">
+          <input type="checkbox" id="hide_senior" />
+          <label for="hide_senior">Hide senior/lead</label>
+        </div>
+        <div class="field check">
+          <input type="checkbox" id="hide_intern" />
+          <label for="hide_intern">Hide intern/student</label>
         </div>
         <div class="field check">
           <input type="checkbox" id="require_salary" />
@@ -461,6 +477,7 @@
         b.push(`<span class="badge bad">stretch +${job.experience_gap}y</span>`);
       else if (typeof job.min_years_experience === "number")
         b.push(`<span class="badge">${job.min_years_experience}+ yrs</span>`);
+      if (job.seniority) b.push(`<span class="badge warn">${esc(job.seniority)}</span>`);
       return b;
     }
 
@@ -609,33 +626,37 @@
     }
 
     // Your years of experience is a stable preference; load and persist it.
-    let prefYears = null, prefTz = null;
     async function loadPrefs() {
       let off = CAIRO_OFFSET;
       try {
         const p = await (await fetch("/preferences")).json();
-        prefYears = p.years_experience;
         if (p.years_experience != null) $("years_exp").value = p.years_experience;
-        prefTz = p.user_utc_offset;
         if (p.user_utc_offset != null) off = p.user_utc_offset;
+        $("known_langs").value = (p.known_languages || []).join(", ");
+        $("excl_titles").value = (p.exclude_title_keywords || []).join(", ");
+        $("hide_senior").checked = (p.exclude_seniorities || []).includes("senior");
+        $("hide_intern").checked = (p.exclude_seniorities || []).includes("intern");
       } catch {}
       $("timezone").value = tzLabel(off); // default to Cairo when unset
     }
+    const parseList = (v) => v.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
     async function persistPrefs() {
       const yv = $("years_exp").value.trim();
-      const years = yv === "" ? null : Number(yv);
-      const tz = tzOffsetFromInput();
-      const patch = {};
-      if (years !== prefYears) patch.years_experience = years;
-      if (tz !== prefTz) patch.user_utc_offset = tz;
-      if (!Object.keys(patch).length) return;
+      const sen = [];
+      if ($("hide_senior").checked) sen.push("senior");
+      if ($("hide_intern").checked) sen.push("intern");
       try {
         await fetch("/preferences", {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            years_experience: yv === "" ? null : Number(yv),
+            user_utc_offset: tzOffsetFromInput(),
+            known_languages: parseList($("known_langs").value),
+            exclude_title_keywords: parseList($("excl_titles").value),
+            exclude_seniorities: sen,
+          }),
         });
-        prefYears = years;
-        prefTz = tz;
       } catch {}
     }
 
