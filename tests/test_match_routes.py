@@ -97,6 +97,21 @@ def test_shortlist_recency_does_not_bury_better_fit(client, session_factory):
     assert ids[0] == "old_strong"  # the floored decay can't overturn a big fit gap
 
 
+def test_shortlist_fit_dominates_recency_when_cosine_compressed(client, session_factory):
+    # Regression: real cosine values cluster in a narrow band. A stale role with a
+    # slightly higher fit must still beat a fresh role with slightly lower fit -
+    # freshness must not dominate once fit is normalized across the candidate set.
+    now = datetime.now(UTC)
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))
+        # cosines ~0.9988 vs ~0.9889: close, like the real corpus.
+        s.add(_job("stale_better", embedding=[1.0, 0.05, 0.0], posted_at=now - timedelta(days=120)))
+        s.add(_job("fresh_worse", embedding=[1.0, 0.15, 0.0], posted_at=now))
+        s.commit()
+    ids = [i["source_id"] for i in client.get("/match/shortlist").json()["items"]]
+    assert ids[0] == "stale_better"
+
+
 def test_shortlist_max_age_cutoff(client, session_factory):
     now = datetime.now(UTC)
     with session_factory() as s:

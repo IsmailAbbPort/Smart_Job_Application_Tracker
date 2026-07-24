@@ -150,6 +150,16 @@ def shortlist(
     candidate_limit = min(limit * _CANDIDATE_MULTIPLIER, _MAX_CANDIDATES)
     ranked = rank_jobs(session, list(cv.embedding), filters=filters, limit=candidate_limit)
 
+    # Normalize fit across the candidate set before applying the recency/experience
+    # multipliers. Cosine values cluster in a narrow band (~0.49-0.55), so multiplying
+    # raw cosine by a recency weight that swings 0.85-1.0 lets freshness dominate fit
+    # (a fresh mediocre role would outrank a stale strong one). Min-max normalizing
+    # spreads fit to [0, 1] so recency/experience become gentle tiebreakers, not the
+    # primary signal. When all candidates tie, every fit is treated as best (1.0).
+    sims = [s for _, s in ranked]
+    lo, hi = (min(sims), max(sims)) if sims else (0.0, 1.0)
+    span = hi - lo
+
     now = datetime.now(UTC)
     scored = []  # (job, similarity, recency, overlap, gap, rank_score)
     for job, similarity in ranked:
@@ -174,7 +184,8 @@ def shortlist(
             penalty_per_year=settings.experience_penalty_per_year,
             floor=settings.experience_floor,
         )
-        scored.append((job, similarity, recency, overlap, gap, similarity * recency * exp))
+        fit = (similarity - lo) / span if span else 1.0
+        scored.append((job, similarity, recency, overlap, gap, fit * recency * exp))
 
     scored.sort(key=lambda t: t[5], reverse=True)
 
