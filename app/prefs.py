@@ -37,6 +37,7 @@ def get_preferences(session: Session) -> SearchPreferences:
             max_experience_gap=None,
             exclude_seniorities=[],
             exclude_title_keywords=[],
+            include_role_families=[],
         )
         session.add(prefs)
         session.commit()
@@ -143,6 +144,16 @@ def preference_filters(
     # title blocklist: drop jobs whose title contains any excluded keyword.
     for kw in [k.strip().lower() for k in (prefs.exclude_title_keywords or []) if k.strip()]:
         conditions.append(~func.lower(Job.title).contains(kw))
+
+    # role-family include: keep only jobs whose inferred family is wanted (unknown
+    # kept, matching the null-kept convention). Empty list = no role filtering.
+    included_families = [
+        f.strip().lower() for f in (prefs.include_role_families or []) if f.strip()
+    ]
+    if included_families:
+        conditions.append(
+            or_(Job.role_family.is_(None), func.lower(Job.role_family).in_(included_families))
+        )
 
     # experience hard cutoff (optional; soft de-ranking is done in the shortlist).
     # Drop jobs that require more than max_experience_gap years beyond the user's.

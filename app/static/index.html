@@ -325,6 +325,10 @@
           <input type="text" id="excl_titles" placeholder="e.g. sales, machine learning" style="min-width: 170px" />
         </div>
         <div class="field">
+          <label for="role_families">Role families</label>
+          <input type="text" id="role_families" placeholder="all (e.g. engineering, data_ml)" style="min-width: 170px" title="Keep only these role families (engineering, data_ml, security, product, design, sales, support, marketing, people, finance_ops, media_content). Blank = all." />
+        </div>
+        <div class="field">
           <label for="remote">Remote</label>
           <select id="remote">
             <option value="">Any</option>
@@ -478,6 +482,7 @@
       else if (typeof job.min_years_experience === "number")
         b.push(`<span class="badge">${job.min_years_experience}+ yrs</span>`);
       if (job.seniority) b.push(`<span class="badge warn">${esc(job.seniority)}</span>`);
+      if (job.role_family) b.push(`<span class="badge">${esc(job.role_family)}</span>`);
       return b;
     }
 
@@ -634,6 +639,7 @@
         if (p.user_utc_offset != null) off = p.user_utc_offset;
         $("known_langs").value = (p.known_languages || []).join(", ");
         $("excl_titles").value = (p.exclude_title_keywords || []).join(", ");
+        $("role_families").value = (p.include_role_families || []).join(", ");
         $("hide_senior").checked = (p.exclude_seniorities || []).includes("senior");
         $("hide_intern").checked = (p.exclude_seniorities || []).includes("intern");
       } catch {}
@@ -654,6 +660,7 @@
             user_utc_offset: tzOffsetFromInput(),
             known_languages: parseList($("known_langs").value),
             exclude_title_keywords: parseList($("excl_titles").value),
+            include_role_families: parseList($("role_families").value),
             exclude_seniorities: sen,
           }),
         });

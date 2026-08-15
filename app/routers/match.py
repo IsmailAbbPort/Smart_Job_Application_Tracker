@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.ai.embedder import Embedder, build_job_document, get_embedder
 from app.ai.judge import Judge, build_job_text, get_judge
 from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
+from app.ai.role_family import RoleClassifier
 from app.applications import annotate_application_status
 from app.config import Settings, get_settings
 from app.db import get_session
@@ -84,6 +85,43 @@ def embed_jobs(
 
     remaining = session.scalar(select(func.count()).select_from(Job).where(Job.embedding.is_(None)))
     return {"embedded": len(jobs), "remaining_unembedded": remaining or 0}
+
+
+@router.post("/classify-roles")
+def classify_roles(
+    session: Session = Depends(get_session),
+    embedder: Embedder = Depends(get_embedder),
+    settings: Settings = Depends(get_settings),
+    force: bool = Query(default=False, description="Re-classify all jobs, not just unclassified"),
+    limit: int = Query(default=6000, ge=1, le=20000, description="Max jobs to classify this call"),
+) -> dict:
+    """Assign each job a role_family from its title (see app/ai/role_family.py).
+
+    Title-only, so it is boilerplate-free and independent of the retrieve embedding.
+    Idempotent: classifies rows without a family unless force re-does all.
+    """
+    stmt = select(Job)
+    if not force:
+        stmt = stmt.where(Job.role_family.is_(None))
+    jobs = session.scalars(stmt.limit(limit)).all()
+
+    distribution: dict[str, int] = {}
+    if jobs:
+        classifier = RoleClassifier.from_embedder(
+            embedder,
+            min_similarity=settings.role_min_similarity,
+            min_margin=settings.role_min_margin,
+        )
+        families = classifier.classify_titles([j.title for j in jobs], embedder)
+        for job, family in zip(jobs, families, strict=True):
+            job.role_family = family
+            distribution[family or "unclassified"] = distribution.get(family or "unclassified", 0) + 1
+        session.commit()
+
+    remaining = session.scalar(
+        select(func.count()).select_from(Job).where(Job.role_family.is_(None))
+    )
+    return {"classified": len(jobs), "remaining_unclassified": remaining or 0, "distribution": distribution}
 
 
 @router.get("/shortlist", response_model=ShortlistResponse)

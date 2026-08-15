@@ -40,6 +40,7 @@ def update_preferences(
                 "exclude_remote_regions",
                 "exclude_seniorities",
                 "exclude_title_keywords",
+                "include_role_families",
             )
             and value is not None
         ):

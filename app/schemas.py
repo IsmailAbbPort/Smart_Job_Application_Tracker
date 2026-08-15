@@ -32,6 +32,7 @@ class JobOut(BaseModel):
     effort_signals: list[str] = Field(default_factory=list)
     min_years_experience: int | None = None
     seniority: str | None = None
+    role_family: str | None = None
     url: str
     posted_at: datetime | None
     ingested_at: datetime
@@ -279,6 +280,7 @@ class PreferencesOut(BaseModel):
     max_experience_gap: int | None
     exclude_seniorities: list[str]
     exclude_title_keywords: list[str]
+    include_role_families: list[str]
     updated_at: datetime
 
 
@@ -298,3 +300,4 @@ class PreferencesUpdate(BaseModel):
     max_experience_gap: int | None = None
     exclude_seniorities: list[str] | None = None
     exclude_title_keywords: list[str] | None = None
+    include_role_families: list[str] | None = None

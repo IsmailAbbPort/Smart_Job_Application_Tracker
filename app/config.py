@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     experience_penalty_per_year: float = 0.06
     experience_floor: float = 0.6
 
+    # Role-family classifier (app/ai/role_family.py): a job title is assigned to the
+    # nearest role centroid only when the top cosine clears role_min_similarity and
+    # beats the runner-up by role_min_margin; otherwise it stays unclassified (kept).
+    role_min_similarity: float = 0.30
+    role_min_margin: float = 0.02
+
 
 @lru_cache
 def get_settings() -> Settings:

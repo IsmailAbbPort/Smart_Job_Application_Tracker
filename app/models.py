@@ -82,6 +82,9 @@ class Job(Base):
     min_years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Coarse seniority inferred from the title: 'intern' | 'senior' | None (mid/junior).
     seniority: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Coarse role family from the title, in embedding space (engineering | sales |
+    # support | ...), null when unclassifiable. See app/ai/role_family.py.
+    role_family: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -210,6 +213,9 @@ class SearchPreferences(Base):
     # known_languages: a job requiring a language not in that list is dropped.
     exclude_seniorities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     exclude_title_keywords: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Role families to keep (e.g. ["engineering", "data_ml"]). Empty = no role
+    # filtering; when set, only jobs in these families (or unclassified) survive.
+    include_role_families: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
