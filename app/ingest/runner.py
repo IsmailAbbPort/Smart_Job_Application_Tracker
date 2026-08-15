@@ -27,7 +27,11 @@ from app.ingest.eligibility import (
 )
 from app.ingest.experience import extract_min_years_experience
 from app.ingest.geo import is_european, resolve_city, resolve_country
-from app.ingest.language import detect_language, extract_required_languages
+from app.ingest.language import (
+    detect_language,
+    extract_required_languages,
+    extract_required_languages_from_title,
+)
 from app.ingest.normalize import (
     dedup_key,
     normalize_company,
@@ -116,7 +120,10 @@ def _apply_derived(job: Job) -> None:
     it works whether fields were just copied from a CanonicalJob or loaded from DB.
     """
     job.language = detect_language(job.title, job.description)
-    job.required_languages = extract_required_languages(job.description)
+    job.required_languages = sorted(
+        set(extract_required_languages(job.description))
+        | set(extract_required_languages_from_title(job.title))
+    )
     job.visa_sponsorship = detect_visa_sponsorship(job.description)
     job.remote_region = detect_remote_region(job.description, is_remote=job.is_remote)
     job.required_utc_offsets = extract_required_utc_offsets(job.description)

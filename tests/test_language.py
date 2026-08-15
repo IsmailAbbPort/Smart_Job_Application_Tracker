@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from app.ingest.language import detect_language, extract_required_languages
+from app.ingest.language import (
+    detect_language,
+    extract_required_languages,
+    extract_required_languages_from_title,
+)
 from app.models import Cv, Job
 
 _EN = (
@@ -47,6 +51,20 @@ def test_extract_required_languages():
     assert extract_required_languages("French C1 is needed.") == ["fr"]
     assert extract_required_languages("German is a plus.") == []  # softened -> not required
     assert extract_required_languages("Python, FastAPI, Docker.") == []
+
+
+def test_extract_required_languages_from_title():
+    f = extract_required_languages_from_title
+    # requirement encoded in the title -> caught
+    assert f("Solutions Consultant (German Speaking)") == ["de"]
+    assert f("Business Support Specialist - German speaking") == ["de"]
+    assert f("Quality Assurance Rater - German (Germany)") == ["de"]
+    assert f("Solutions Consultant (French Speaking)") == ["fr"]
+    # a country/location, not a language requirement -> not flagged
+    assert f("Enterprise Solutions Engineer - Germany") == []
+    assert f("Deployment Strategist - Germany") == []
+    assert f("Backend Engineer") == []
+    assert f(None) == []
 
 
 # --- Tier 2 filter ---

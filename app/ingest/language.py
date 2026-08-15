@@ -56,6 +56,19 @@ _SOFT_CUE = re.compile(
 
 _MIN_DETECT_CHARS = 80
 
+# A language named in the *title* is almost always a hard requirement (job boards
+# tag "(German Speaking)" / "- French" roles that way). Two high-precision cues:
+#   A. "<lang> speaking/speaker" (with optional space/hyphen): "German speaking".
+#   B. a bare "<lang>" set off by a "-" or "(" qualifier: "- German", "(German)".
+# Both rely on \b so "Germany" (a location) never matches "german". Titles like
+# "... - Germany" (a place, not a language) are therefore left untouched.
+_TITLE_LANG_NAMES = "|".join(re.escape(n) for n in _LANG_NAMES)
+_TITLE_LANG_CUE = re.compile(
+    rf"(?:\b(?P<a>{_TITLE_LANG_NAMES})[\s-]*(?:speaking|speaker)\b)"
+    rf"|(?:[-(]\s*(?P<b>{_TITLE_LANG_NAMES})\b)",
+    re.IGNORECASE,
+)
+
 
 def detect_language(*texts: str | None, min_chars: int = _MIN_DETECT_CHARS) -> str | None:
     """Detect the dominant language of the given texts. None if too short to trust."""
@@ -85,4 +98,22 @@ def extract_required_languages(text: str | None) -> list[str]:
             if _REQUIRE_CUE.search(window) and not _SOFT_CUE.search(window):
                 found.add(code)
                 break
+    return sorted(found)
+
+
+def extract_required_languages_from_title(title: str | None) -> list[str]:
+    """Spoken-language requirements stated in the *title* (ISO codes).
+
+    Job boards encode a hard language requirement into the title itself
+    ("Solutions Consultant (German Speaking)", "Support - German speaking"),
+    which `extract_required_languages` misses because it reads the description.
+    High-precision by design: only a "speaking/speaker" cue or a dash/paren-set-off
+    bare language name counts, so a location like "- Germany" is never flagged.
+    """
+    if not title:
+        return []
+    found: set[str] = set()
+    for match in _TITLE_LANG_CUE.finditer(title):
+        name = (match.group("a") or match.group("b")).lower()
+        found.add(_LANG_NAMES[name])
     return sorted(found)
