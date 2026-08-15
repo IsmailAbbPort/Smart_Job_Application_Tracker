@@ -12,6 +12,7 @@ daily run belongs with the scheduled-ingest work, deliberately deferred.
 from __future__ import annotations
 
 import time
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from sqlalchemy import select
@@ -25,8 +26,30 @@ _POLITE_DELAY = 0.1
 _DEAD_STATUSES = {404, 410}
 
 
+def _is_dead_redirect(original: str, final: str) -> bool:
+    """True when a 2xx landing is actually a "posting gone" page reached by redirect.
+
+    Some ATS boards (Greenhouse) don't 404 a pulled listing: they 302 the job URL to
+    the board root tagged `?error=true`, so a naive status check sees 200 and keeps a
+    dead job. Two high-precision signals: the explicit error marker, or a Greenhouse
+    job path (/<org>/jobs/<id>) that collapsed to the bare board (lost its /jobs/).
+    Deliberately narrow so a legitimate redirect to a live page is never flagged.
+    """
+    orig = urlparse(original)
+    fin = urlparse(final)
+    if parse_qs(fin.query).get("error") == ["true"]:
+        return True
+    if "greenhouse.io" in (fin.netloc or "") and "/jobs/" in orig.path and "/jobs/" not in fin.path:
+        return True
+    return False
+
+
 def check_alive(client: httpx.Client, url: str) -> bool | None:
-    """True if the posting is up, False if definitively gone (404/410), None if unknown."""
+    """True if the posting is up, False if definitively gone, None if unknown.
+
+    Gone = a 404/410, or a redirect that lands on a board's "posting not found" page
+    (see _is_dead_redirect). Everything else 2xx is alive; 403/429/5xx stay unknown.
+    """
     if not url:
         return None
     try:
@@ -36,7 +59,7 @@ def check_alive(client: httpx.Client, url: str) -> bool | None:
     if resp.status_code in _DEAD_STATUSES:
         return False
     if resp.status_code < 400:
-        return True
+        return False if _is_dead_redirect(url, str(resp.url)) else True
     return None  # 403/429/5xx etc. -> unknown, keep
 
 

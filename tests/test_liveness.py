@@ -39,6 +39,25 @@ def test_check_alive_status_mapping():
     assert check_alive(c, "") is None
 
 
+def _greenhouse_handler(request: httpx.Request) -> httpx.Response:
+    """Mimic Greenhouse: a pulled job 302s to the board root tagged ?error=true;
+    a live job path (with /jobs/<id>) returns 200."""
+    url = str(request.url)
+    if url.endswith("/jobs/dead"):
+        return httpx.Response(
+            302, headers={"Location": "https://job-boards.greenhouse.io/acme?error=true"}
+        )
+    return httpx.Response(200, text="ok")
+
+
+def test_check_alive_detects_redirect_to_error_board():
+    # Regression: a deleted Greenhouse listing 302s to <board>?error=true and lands
+    # on a 200, which the old status-only check wrongly treated as alive.
+    c = _client(_greenhouse_handler)
+    assert check_alive(c, "https://job-boards.greenhouse.io/acme/jobs/dead") is False
+    assert check_alive(c, "https://job-boards.greenhouse.io/acme/jobs/live") is True
+
+
 def test_check_alive_network_error_is_unknown():
     def boom(request):
         raise httpx.ConnectError("down")
