@@ -6,7 +6,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.ai.judge import FakeJudge, get_judge
-from app.config import Settings
+from app.config import Settings, get_settings
+from app.main import app as fastapi_app
 from app.models import Cv, Job
 from app.schemas import MatchVerdict
 
@@ -140,5 +141,10 @@ def test_rerank_orders_by_judge_score(judge_client, session_factory):
 
 
 def test_rerank_requires_key(client):
-    # No judge override -> real get_judge -> 503 without ANTHROPIC_API_KEY.
-    assert client.post("/match/rerank", json={"job_ids": [1]}).status_code == 503
+    # Force keyless settings so the gate is exercised regardless of the ambient .env
+    # (which now carries a real key). Real get_judge -> 503 without ANTHROPIC_API_KEY.
+    fastapi_app.dependency_overrides[get_settings] = lambda: Settings(anthropic_api_key=None)
+    try:
+        assert client.post("/match/rerank", json={"job_ids": [1]}).status_code == 503
+    finally:
+        fastapi_app.dependency_overrides.pop(get_settings, None)

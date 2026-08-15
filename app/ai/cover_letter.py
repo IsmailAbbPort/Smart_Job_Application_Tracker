@@ -22,6 +22,7 @@ from typing import Protocol
 
 from fastapi import Depends, HTTPException
 
+from app.ai.tooluse import coerce_tool_input
 from app.config import Settings, get_settings
 from app.schemas import CoverLetterResult, FabricationCheck, FabricationClaim, FabricationReport
 
@@ -120,7 +121,8 @@ class AnthropicDrafter:
     def _check(self, cv_text: str, letter: str) -> FabricationCheck:
         message = self._client.messages.create(
             model=self.model,
-            max_tokens=1500,
+            # Headroom for the claims list; a tight cap can truncate it mid-array.
+            max_tokens=4096,
             system=_CHECK_SYSTEM,
             tools=[self._tool],
             tool_choice={"type": "tool", "name": _CHECK_TOOL},
@@ -128,7 +130,9 @@ class AnthropicDrafter:
         )
         for block in message.content:
             if getattr(block, "type", None) == "tool_use" and block.name == _CHECK_TOOL:
-                return FabricationCheck.model_validate(block.input)
+                return FabricationCheck.model_validate(
+                    coerce_tool_input(FabricationCheck, block.input)
+                )
         raise RuntimeError("fabrication check returned no tool_use result")
 
     def write(self, cv_text: str, job_text: str) -> CoverLetterResult:

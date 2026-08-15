@@ -17,6 +17,7 @@ from typing import Protocol
 
 from fastapi import Depends, HTTPException
 
+from app.ai.tooluse import coerce_tool_input
 from app.config import Settings, get_settings
 from app.schemas import DimensionScores, MatchedRequirement, MatchTier, MatchVerdict
 
@@ -70,7 +71,9 @@ def _build_prompt(cv_text: str, job_text: str) -> str:
         f"{cv_text[:_MAX_CV_CHARS]}\n\n"
         "## JOB POSTING\n"
         f"{job_text[:_MAX_JOB_CHARS]}\n\n"
-        f"Call {_VERDICT_TOOL} with your verdict."
+        f"Call {_VERDICT_TOOL} with your verdict. Populate matched_requirements and "
+        "gaps as real JSON arrays (not strings), and always list the unmet or "
+        "unevidenced requirements in gaps - leave it empty only if the CV meets every one."
     )
 
 
@@ -91,7 +94,11 @@ class AnthropicJudge:
     def judge(self, cv_text: str, job_text: str) -> MatchVerdict:
         message = self._client.messages.create(
             model=self.model,
-            max_tokens=1500,
+            # Generous ceiling: Haiku sometimes serializes the list fields as escaped
+            # JSON strings, which roughly doubles the token count. A tight limit would
+            # truncate that into unparseable JSON (see app/ai/tooluse.py), so leave
+            # comfortable headroom and let the coercion repair the shape.
+            max_tokens=4096,
             system=_SYSTEM_PROMPT,
             tools=[self._tool],
             tool_choice={"type": "tool", "name": _VERDICT_TOOL},
@@ -99,7 +106,7 @@ class AnthropicJudge:
         )
         for block in message.content:
             if getattr(block, "type", None) == "tool_use" and block.name == _VERDICT_TOOL:
-                return MatchVerdict.model_validate(block.input)
+                return MatchVerdict.model_validate(coerce_tool_input(MatchVerdict, block.input))
         raise RuntimeError("judge returned no tool_use verdict")
 
 
