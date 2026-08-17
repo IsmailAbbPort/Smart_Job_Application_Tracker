@@ -1,5 +1,17 @@
 # syntax=docker/dockerfile:1
 
+# --- Stage 1: build the React (Vite) frontend into app/static ---
+FROM node:22-slim AS frontend
+WORKDIR /fe
+# Install deps first (cached layer) from the lockfile only.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+# Then the source; `npm run build` emits to ../app/static (see vite.config.ts),
+# i.e. /app/static inside this stage.
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: the Python API, serving the built frontend ---
 FROM python:3.12-slim
 
 # uv: fast, reproducible installs from pyproject.toml + uv.lock.
@@ -20,6 +32,10 @@ RUN uv sync --frozen --no-install-project --no-dev
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini ./alembic.ini
+
+# Overlay the built frontend (index.html + assets) from the Node stage so the
+# image never ships stale or locally-built static files.
+COPY --from=frontend /app/static ./app/static
 
 # Put the project's venv on PATH.
 ENV PATH="/app/.venv/bin:$PATH"

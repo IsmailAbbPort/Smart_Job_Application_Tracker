@@ -20,6 +20,15 @@ dist/
 .coverage
 htmlcov/
 
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Built frontend assets (Docker rebuilds these from frontend/ on deploy).
+# The directory is kept via .gitkeep so FastAPI's StaticFiles mount always exists.
+/app/static/assets/
+/app/static/index.html
+
 # uv
 # (uv.lock IS committed — it pins the dependency graph)
 
@@ -32,3 +41,6 @@ Thumbs.db
 
 # Postgres volume (if bind-mounted locally)
 pgdata/
+
+# TypeScript incremental build cache
+*.tsbuildinfo

@@ -1,9 +1,18 @@
 # Convenience wrappers. Local targets need `uv` installed; `up`/`down` need Docker.
 
-.PHONY: install up down logs fmt lint test check
+.PHONY: install up down logs fmt lint test check fe-install fe-dev fe-build
 
 install:        ## Sync dependencies into a local .venv
 	uv sync --all-extras --dev
+
+fe-install:     ## Install frontend (Vite/React) dependencies
+	cd frontend && npm install
+
+fe-dev:         ## Run the Vite dev server (proxies API paths to :8000)
+	cd frontend && npm run dev
+
+fe-build:       ## Build the React app into app/static (what the API serves)
+	cd frontend && npm run build
 
 up:             ## Start API + Postgres (pgvector) in Docker
 	docker compose up --build
