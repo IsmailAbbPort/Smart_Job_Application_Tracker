@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
 
+    # Auth: signs the session JWT stored in an httpOnly cookie. Override in prod via
+    # env; the dev default is fine locally but must not be used on a real deploy.
+    jwt_secret: str = "dev-insecure-change-me-in-production-0123456789"
+    jwt_expire_days: int = 30
+    # Set true in production (HTTPS) so the session cookie is marked Secure.
+    cookie_secure: bool = False
+
     # AI model selection. Swappable via env so the pipeline is not pinned to one
     # provider/model (easier A/B once a golden set exists; nicer to reuse).
     # embedding_dimensions must match the pgvector column (1536); text-embedding-3

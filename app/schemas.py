@@ -88,15 +88,46 @@ class CvUpload(BaseModel):
     content_base64: str
 
 
+class CvUpdate(BaseModel):
+    """Edit an existing CV's label (point 21)."""
+
+    label: str
+
+
 class CvOut(BaseModel):
     id: int
     label: str
     embedded: bool
     created_at: datetime
+    filename: str | None = None
+    content_type: str | None = None
+    size_bytes: int | None = None
 
 
 class CvDetail(CvOut):
     content: str
+
+
+# --- Auth ---
+
+
+class RegisterIn(BaseModel):
+    name: str
+    email: str
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str
 
 
 class ShortlistItem(JobOut):

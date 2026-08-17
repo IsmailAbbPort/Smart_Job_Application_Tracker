@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.auth import get_current_user_optional
 from app.db import get_session
+from app.models import User
 from app.prefs import get_preferences
 from app.schemas import PreferencesOut, PreferencesUpdate
 
@@ -13,15 +15,20 @@ router = APIRouter(prefix="/preferences", tags=["preferences"])
 
 
 @router.get("", response_model=PreferencesOut)
-def read_preferences(session: Session = Depends(get_session)) -> PreferencesOut:
-    return PreferencesOut.model_validate(get_preferences(session))
+def read_preferences(
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> PreferencesOut:
+    return PreferencesOut.model_validate(get_preferences(session, user.id if user else None))
 
 
 @router.put("", response_model=PreferencesOut)
 def update_preferences(
-    payload: PreferencesUpdate, session: Session = Depends(get_session)
+    payload: PreferencesUpdate,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
 ) -> PreferencesOut:
-    prefs = get_preferences(session)
+    prefs = get_preferences(session, user.id if user else None)
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         # Normalize blocklists: trim, drop blanks, de-duplicate (case-insensitive).

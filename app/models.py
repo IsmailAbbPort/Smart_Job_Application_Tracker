@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -121,14 +122,44 @@ class SourceFetch(Base):
     last_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class User(Base):
+    """A registered account. Owns CVs, applications, and search preferences.
+
+    Accounts are optional: unauthenticated ("guest") data is stored with a NULL
+    owner_id and behaves exactly as the single-user app did before auth.
+    """
+
+    __tablename__ = "user_account"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Cv(Base):
-    """The user's CV: raw text + its semantic embedding (Phase 2)."""
+    """The user's CV: raw text + its semantic embedding (Phase 2).
+
+    The original uploaded file is kept (file_data + filename + content_type) so the
+    UI can preview the PDF and re-open it in the edit dialog.
+    """
 
     __tablename__ = "cv"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     label: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Original uploaded file, kept for preview. Null for text-only CVs (POST /cv).
+    file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType(EMBED_DIM), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -183,7 +214,11 @@ class SearchPreferences(Base):
 
     __tablename__ = "search_preferences"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # singleton, always 1
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # One preferences row per owner; NULL owner is the guest singleton.
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=True, unique=True
+    )
     remote_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     require_european: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     exclude_countries: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -260,9 +295,14 @@ class Application(Base):
     """
 
     __tablename__ = "application"
-    __table_args__ = (UniqueConstraint("job_id", name="uq_application_job"),)
+    # One row per (owner, job): each account tracks a job independently; guest
+    # rows (NULL owner) are de-duplicated by the upsert logic in the router.
+    __table_args__ = (UniqueConstraint("owner_id", "job_id", name="uq_application_owner_job"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     job_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("job.id", ondelete="CASCADE"), nullable=False, index=True
     )

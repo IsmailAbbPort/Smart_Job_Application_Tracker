@@ -13,10 +13,11 @@ from app.ai.judge import Judge, build_job_text, get_judge
 from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
 from app.ai.role_family import RoleClassifier
 from app.applications import annotate_application_status
+from app.auth import get_current_user_optional
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.ingest.eligibility import timezone_overlap_hours
-from app.models import Cv, Job, Match, SearchPreferences
+from app.models import Cv, Job, Match, SearchPreferences, User
 from app.prefs import get_preferences, preference_filters
 from app.schemas import (
     JobOut,
@@ -37,13 +38,19 @@ _MAX_RERANK = 20
 router = APIRouter(prefix="/match", tags=["match"])
 
 
-def _resolve_cv(session: Session, cv_id: int | None) -> Cv:
-    """The requested CV, or the most recent one. 404 if there is none, 409 if unembedded."""
-    cv = (
-        session.get(Cv, cv_id)
-        if cv_id
-        else session.scalar(select(Cv).order_by(Cv.created_at.desc()).limit(1))
-    )
+def _resolve_cv(session: Session, cv_id: int | None, owner_id: int | None = None) -> Cv:
+    """The requested CV, or the owner's most recent one. 404 if there is none.
+
+    Scopes to owner_id (None = guest) so accounts only see their own CVs.
+    """
+    if cv_id:
+        cv = session.get(Cv, cv_id)
+        if cv is not None and cv.owner_id != owner_id:
+            cv = None
+    else:
+        cv = session.scalar(
+            select(Cv).where(Cv.owner_id == owner_id).order_by(Cv.created_at.desc()).limit(1)
+        )
     if cv is None:
         raise HTTPException(status_code=404, detail="no CV found; POST /cv first")
     return cv
@@ -131,6 +138,11 @@ def shortlist(
     limit: int = Query(default=25, ge=1, le=100),
     is_remote: bool | None = Query(default=None),
     europe: bool | None = Query(default=None),
+    region: str | None = Query(
+        default=None,
+        description="Keep only jobs on this continent/region "
+        "(africa|asia|europe|latin_america|north_america|oceania)",
+    ),
     country: str | None = Query(default=None),
     cities: list[str] | None = Query(
         default=None,
@@ -154,6 +166,7 @@ def shortlist(
     ),
     ignore_prefs: bool = Query(default=False, description="Ignore saved default filters"),
     settings: Settings = Depends(get_settings),
+    user: User | None = Depends(get_current_user_optional),
 ) -> ShortlistResponse:
     """Cosine-rank embedded jobs against the CV, then adjust for freshness.
 
@@ -162,18 +175,20 @@ def shortlist(
     older match. Saved search preferences (remote/europe defaults + blocklist +
     freshness cutoff) apply unless overridden per request or bypassed with ignore_prefs.
     """
-    cv = _resolve_cv(session, cv_id)
+    owner_id = user.id if user else None
+    cv = _resolve_cv(session, cv_id, owner_id)
     if cv.embedding is None:
         raise HTTPException(status_code=409, detail="CV has no embedding")
 
     # Accept both repeated params (?cities=a&cities=b) and comma lists (?cities=a,b).
     city_list = [c for raw in (cities or []) for c in raw.split(",")] or None
 
-    prefs = SearchPreferences() if ignore_prefs else get_preferences(session)
+    prefs = SearchPreferences() if ignore_prefs else get_preferences(session, owner_id)
     filters = preference_filters(
         prefs,
         is_remote=is_remote,
         europe=europe,
+        region=region,
         country=country,
         cities=city_list,
         language=language,
@@ -243,7 +258,7 @@ def shortlist(
         )
         for job, similarity, recency, overlap, gap, _score in scored[:limit]
     ]
-    annotate_application_status(session, items)
+    annotate_application_status(session, items, owner_id)
     return ShortlistResponse(cv_id=cv.id, count=len(items), items=items)
 
 
@@ -272,6 +287,7 @@ def rerank(
     payload: RerankRequest,
     session: Session = Depends(get_session),
     judge: Judge = Depends(get_judge),
+    user: User | None = Depends(get_current_user_optional),
 ) -> list[MatchOut]:
     """Batch-judge the given jobs (the high-precision rerank stage) and return them
     ordered by the LLM judge's score - highest fit first.
@@ -280,7 +296,7 @@ def rerank(
     this reranks exactly the visible set. Cached per (cv, job); capped, and needs
     ANTHROPIC_API_KEY (503 without it).
     """
-    cv = _resolve_cv(session, payload.cv_id)
+    cv = _resolve_cv(session, payload.cv_id, user.id if user else None)
     verdicts: list[MatchOut] = []
     for job_id in payload.job_ids[:_MAX_RERANK]:
         job = session.get(Job, job_id)
@@ -299,13 +315,14 @@ def judge_job(
     judge: Judge = Depends(get_judge),
     cv_id: int | None = Query(default=None, description="CV to judge against; defaults to latest"),
     refresh: bool = Query(default=False, description="Re-run the judge even if a verdict exists"),
+    user: User | None = Depends(get_current_user_optional),
 ) -> MatchOut:
     """Run the LLM judge on one job (the rerank stage) and persist the verdict.
 
     Cached: returns the stored verdict unless `refresh=true`. Needs ANTHROPIC_API_KEY
     (503 without it).
     """
-    cv = _resolve_cv(session, cv_id)
+    cv = _resolve_cv(session, cv_id, user.id if user else None)
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")

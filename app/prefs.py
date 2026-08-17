@@ -9,19 +9,23 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.geo_region import region_country_names
 from app.models import Job, SearchPreferences
 
 
-def get_preferences(session: Session) -> SearchPreferences:
-    """Return the singleton preferences row, creating a permissive default if absent."""
-    prefs = session.get(SearchPreferences, 1)
+def get_preferences(session: Session, owner_id: int | None = None) -> SearchPreferences:
+    """Return the owner's preferences row, creating a permissive default if absent.
+
+    owner_id is None for guests (the pre-accounts singleton behaviour).
+    """
+    prefs = session.scalar(select(SearchPreferences).where(SearchPreferences.owner_id == owner_id))
     if prefs is None:
         prefs = SearchPreferences(
-            id=1,
+            owner_id=owner_id,
             remote_only=False,
             require_european=False,
             exclude_countries=[],
@@ -50,6 +54,7 @@ def preference_filters(
     *,
     is_remote: bool | None = None,
     europe: bool | None = None,
+    region: str | None = None,
     country: str | None = None,
     cities: list[str] | None = None,
     language: str | None = None,
@@ -73,6 +78,13 @@ def preference_filters(
         conditions.append(Job.is_european == europe)
     elif prefs.require_european:
         conditions.append(Job.is_european.is_(True))
+
+    # explicit continent/region include filter: keep jobs whose country falls in the
+    # region. Unknown/unmappable regions add no condition (kept permissive).
+    if region:
+        names = region_country_names(region)
+        if names:
+            conditions.append(func.lower(Job.country).in_(names))
 
     # explicit country include filter.
     if country is not None:

@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.db import ping
 from app.routers import (
     applications,
+    auth,
     cv,
     ingest,
     jobs,
@@ -28,6 +29,7 @@ settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version=__version__)
 
+app.include_router(auth.router)
 app.include_router(jobs.router)
 app.include_router(ingest.router)
 app.include_router(targets.router)

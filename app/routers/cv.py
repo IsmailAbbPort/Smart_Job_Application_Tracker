@@ -5,29 +5,62 @@ from __future__ import annotations
 import base64
 import binascii
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.embedder import Embedder, build_cv_document, get_embedder
-from app.cv_extract import extract_cv_text
+from app.auth import get_current_user_optional
+from app.cv_extract import extract_cv_text, looks_like_pdf
 from app.db import get_session
-from app.models import Cv
-from app.schemas import CvCreate, CvDetail, CvOut, CvUpload
+from app.models import Cv, User
+from app.schemas import CvCreate, CvDetail, CvOut, CvUpdate, CvUpload
 
 router = APIRouter(prefix="/cv", tags=["cv"])
+
+# Upload limits (surfaced in the UI too). 5 MB, PDF or plain text only.
+MAX_CV_BYTES = 5 * 1024 * 1024
+
+
+def _owner_id(user: User | None) -> int | None:
+    return user.id if user else None
 
 
 def _to_out(cv: Cv) -> CvOut:
     return CvOut(
-        id=cv.id, label=cv.label, embedded=cv.embedding is not None, created_at=cv.created_at
+        id=cv.id,
+        label=cv.label,
+        embedded=cv.embedding is not None,
+        created_at=cv.created_at,
+        filename=cv.filename,
+        content_type=cv.content_type,
+        size_bytes=cv.size_bytes,
     )
 
 
-def _embed_and_store(label: str, content: str, session: Session, embedder: Embedder) -> CvOut:
+def _embed_and_store(
+    label: str,
+    content: str,
+    session: Session,
+    embedder: Embedder,
+    owner_id: int | None,
+    *,
+    file_data: bytes | None = None,
+    filename: str | None = None,
+    content_type: str | None = None,
+) -> CvOut:
     """Embed the CV text and persist it. Shared by the text and upload endpoints."""
     vector = embedder.embed([build_cv_document(content)])[0]
-    cv = Cv(label=label, content=content, embedding=vector)
+    cv = Cv(
+        owner_id=owner_id,
+        label=label,
+        content=content,
+        embedding=vector,
+        file_data=file_data,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=len(file_data) if file_data is not None else None,
+    )
     session.add(cv)
     session.commit()
     session.refresh(cv)
@@ -39,8 +72,9 @@ def create_cv(
     payload: CvCreate,
     session: Session = Depends(get_session),
     embedder: Embedder = Depends(get_embedder),
+    user: User | None = Depends(get_current_user_optional),
 ) -> CvOut:
-    return _embed_and_store(payload.label, payload.content, session, embedder)
+    return _embed_and_store(payload.label, payload.content, session, embedder, _owner_id(user))
 
 
 @router.post("/upload", response_model=CvOut, status_code=201)
@@ -48,6 +82,7 @@ def upload_cv(
     payload: CvUpload,
     session: Session = Depends(get_session),
     embedder: Embedder = Depends(get_embedder),
+    user: User | None = Depends(get_current_user_optional),
 ) -> CvOut:
     """Accept a base64-encoded CV file (PDF or text), extract its text, embed, store."""
     try:
@@ -55,29 +90,97 @@ def upload_cv(
     except (binascii.Error, ValueError) as exc:
         raise HTTPException(status_code=422, detail="content_base64 is not valid base64") from exc
 
+    if len(raw) > MAX_CV_BYTES:
+        raise HTTPException(status_code=413, detail="CV file is too large (max 5 MB).")
+
+    is_pdf = looks_like_pdf(payload.filename, raw)
+    if not is_pdf and not payload.filename.lower().endswith(".txt"):
+        raise HTTPException(status_code=422, detail="Only PDF or .txt files are accepted.")
+
     content = extract_cv_text(payload.filename, raw)
     if not content:
         raise HTTPException(
             status_code=422, detail="could not extract any text from the uploaded file"
         )
-    return _embed_and_store(payload.label, content, session, embedder)
+    return _embed_and_store(
+        payload.label,
+        content,
+        session,
+        embedder,
+        _owner_id(user),
+        file_data=raw,
+        filename=payload.filename,
+        content_type="application/pdf" if is_pdf else "text/plain",
+    )
 
 
 @router.get("", response_model=list[CvOut])
-def list_cvs(session: Session = Depends(get_session)) -> list[CvOut]:
-    rows = session.scalars(select(Cv).order_by(Cv.created_at.desc())).all()
+def list_cvs(
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> list[CvOut]:
+    rows = session.scalars(
+        select(Cv).where(Cv.owner_id == _owner_id(user)).order_by(Cv.created_at.desc())
+    ).all()
     return [_to_out(cv) for cv in rows]
 
 
-@router.get("/{cv_id}", response_model=CvDetail)
-def get_cv(cv_id: int, session: Session = Depends(get_session)) -> CvDetail:
+def _get_owned(cv_id: int, session: Session, user: User | None) -> Cv:
     cv = session.get(Cv, cv_id)
-    if cv is None:
+    if cv is None or cv.owner_id != _owner_id(user):
         raise HTTPException(status_code=404, detail="cv not found")
+    return cv
+
+
+@router.get("/{cv_id}", response_model=CvDetail)
+def get_cv(
+    cv_id: int,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> CvDetail:
+    cv = _get_owned(cv_id, session, user)
     return CvDetail(
         id=cv.id,
         label=cv.label,
         embedded=cv.embedding is not None,
         created_at=cv.created_at,
         content=cv.content,
+        filename=cv.filename,
+        content_type=cv.content_type,
+        size_bytes=cv.size_bytes,
+    )
+
+
+@router.patch("/{cv_id}", response_model=CvOut)
+def update_cv(
+    cv_id: int,
+    payload: CvUpdate,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> CvOut:
+    cv = _get_owned(cv_id, session, user)
+    label = payload.label.strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="Label cannot be empty.")
+    cv.label = label
+    session.commit()
+    session.refresh(cv)
+    return _to_out(cv)
+
+
+@router.get("/{cv_id}/file")
+def get_cv_file(
+    cv_id: int,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> Response:
+    """Serve the original uploaded file so the UI can preview it (inline)."""
+    cv = _get_owned(cv_id, session, user)
+    if cv.file_data is None:
+        raise HTTPException(status_code=404, detail="no file stored for this CV")
+    disposition = f'inline; filename="{(cv.filename or "cv").replace(chr(34), "")}"'
+    return Response(
+        content=cv.file_data,
+        media_type=cv.content_type or "application/octet-stream",
+        headers={"Content-Disposition": disposition},
     )
