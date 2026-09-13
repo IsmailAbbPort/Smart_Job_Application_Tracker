@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, UploadCloud } from "lucide-react";
 import { Modal } from "../../components/Modal";
+
+// pdf.js is heavy (~1 MB); load it only when a PDF preview is actually shown.
+const PdfPreview = lazy(() =>
+  import("../../components/PdfPreview").then((m) => ({ default: m.PdfPreview })),
+);
 import { api } from "../../api";
 import { CV_ACCEPT, CV_LIMIT_HINT, CV_MAX_BYTES } from "../../constants";
 import { fileToBase64, fmtBytes } from "../../format";
@@ -148,9 +153,15 @@ export function CvModal({
         </div>
       )}
 
-      {previewUrl && isPdf && <iframe className="cv-preview" src={previewUrl} title="CV preview" />}
+      {previewUrl && isPdf && (
+        <Suspense fallback={<div className="pdf-msg">Loading preview...</div>}>
+          <PdfPreview url={previewUrl} />
+        </Suspense>
+      )}
       {previewUrl && !isPdf && (
-        <iframe className="cv-preview" src={previewUrl} title="CV preview" />
+        <div className="cv-textnote">
+          <FileText size={16} /> Text CV - no visual preview needed.
+        </div>
       )}
 
       <div className="field" style={{ marginTop: 14 }}>

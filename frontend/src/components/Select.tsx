@@ -25,6 +25,13 @@ export function Select({ label, help, id, ...props }: BaseProps) {
       inputId={id}
       placeholder={props.placeholder ?? "Select..."}
       noOptionsMessage={() => "No matches"}
+      // Portal the menu to <body> so it renders above the sticky filter card
+      // (point 15); auto placement flips it up when there's no room below
+      // (point 2); fixed position keeps it attached to the control on scroll.
+      menuPortalTarget={typeof document !== "undefined" ? document.body : undefined}
+      menuPosition="fixed"
+      menuPlacement="auto"
+      styles={{ menuPortal: (base) => ({ ...base, zIndex: 9999 }) }}
       {...props}
     />
   );

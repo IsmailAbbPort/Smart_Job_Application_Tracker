@@ -18,6 +18,84 @@
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.22);
+  --bg-glow: #141a26;
+  --accent-glow: rgba(110, 168, 254, 0.15);
+  --accent-glow-strong: rgba(110, 168, 254, 0.25);
+  --accent-hover: #86b6ff;
+  --btn-hover: #2a3040;
+  --drag-tint: #151b28;
+  --header-bg: rgba(11, 13, 18, 0.8);
+}
+
+/* Light colour scheme: white cards on a cool light-grey page, dark slate text,
+   a deeper blue accent (for contrast on light). Dark stays the default. */
+[data-theme="light"] {
+  --bg: #eef1f7; /* cool light-grey page */
+  --bg-glow: #e2e8f5; /* subtle top highlight */
+  --panel: #ffffff; /* white cards */
+  --panel-2: #f2f5fa; /* inputs / subtle surfaces */
+  --panel-3: #e7ecf4; /* hover / rows */
+  --border: #dbe1ec;
+  --border-2: #c5cddc;
+  --text: #1a2233; /* dark slate */
+  --muted: #5a6577;
+  --faint: #8a94a6;
+  --accent: #1f7a44; /* forest green, reads well on white */
+  --accent-ink: #ffffff;
+  --accent-hover: #196237;
+  --good: #15803d;
+  --warn: #b45309;
+  --bad: #dc2626;
+  --bad-strong: #b91c1c;
+  --purple: #7c3aed;
+  --accent-glow: rgba(31, 122, 68, 0.18);
+  --accent-glow-strong: rgba(31, 122, 68, 0.26);
+  --btn-hover: #e7ecf4;
+  --drag-tint: #e0f0e6;
+  --header-bg: rgba(255, 255, 255, 0.85);
+  --shadow: 0 1px 2px rgba(26, 34, 51, 0.08), 0 10px 30px rgba(26, 34, 51, 0.1);
+}
+/* Light-theme surface fixes for elements with tinted badge/verdict colours. */
+[data-theme="light"] .badge {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--muted);
+}
+[data-theme="light"] .badge.remote,
+[data-theme="light"] .badge.good {
+  color: #157347;
+  border-color: #a9d5bd;
+  background: #e5f3ec;
+}
+[data-theme="light"] .badge.eu {
+  color: #2b4b8a;
+  border-color: #b8c6e6;
+  background: #e7edf9;
+}
+[data-theme="light"] .badge.warn {
+  color: #8a5a00;
+  border-color: #e3cf9b;
+  background: #faf1dd;
+}
+[data-theme="light"] .badge.bad {
+  color: #c0102a;
+  border-color: #f0b3bc;
+  background: #fde8ea;
+}
+[data-theme="light"] .tier.strong {
+  color: #157347;
+  border-color: #a9d5bd;
+  background: #e5f3ec;
+}
+[data-theme="light"] .tier.medium {
+  color: #8a5a00;
+  border-color: #e3cf9b;
+  background: #faf1dd;
+}
+[data-theme="light"] .tier.weak {
+  color: #c0102a;
+  border-color: #f0b3bc;
+  background: #fde8ea;
 }
 * {
   box-sizing: border-box;
@@ -25,7 +103,7 @@
 body {
   margin: 0;
   font: 15px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: radial-gradient(1200px 600px at 70% -10%, #141a26 0%, var(--bg) 55%) fixed;
+  background: radial-gradient(1200px 600px at 70% -10%, var(--bg-glow) 0%, var(--bg) 55%) fixed;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
@@ -74,7 +152,7 @@ header {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: rgba(11, 13, 18, 0.8);
+  background: var(--header-bg);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   padding: 14px 24px;
@@ -159,6 +237,78 @@ header {
   color: var(--text);
   background: var(--panel-2);
 }
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.header-actions .authbtn {
+  margin-left: 0;
+}
+.theme-btn {
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+}
+.theme-menu {
+  position: relative;
+  display: inline-flex;
+}
+.theme-menu-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  background: var(--panel-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: fade 0.12s ease;
+}
+.theme-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.theme-menu-item:hover {
+  background: var(--panel-2);
+}
+.theme-menu-item.active {
+  color: var(--accent);
+}
+.theme-swatch {
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border-2);
+  flex: none;
+}
+.theme-swatch > span {
+  width: 12px;
+  height: 16px;
+  display: block;
+}
+.theme-name {
+  flex: 1 1 auto;
+}
+.theme-check {
+  color: var(--accent);
+}
 
 main {
   max-width: 1160px;
@@ -179,7 +329,7 @@ button {
   transition: opacity 0.15s, background 0.15s, border-color 0.15s;
 }
 button:hover {
-  background: #2a3040;
+  background: var(--btn-hover);
 }
 button:disabled {
   opacity: 0.55;
@@ -189,10 +339,10 @@ button:disabled {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
-  box-shadow: 0 4px 14px rgba(110, 168, 254, 0.25);
+  box-shadow: 0 4px 14px var(--accent-glow-strong);
 }
 .btn-primary:hover {
-  background: #86b6ff;
+  background: var(--accent-hover);
 }
 .btn-ghost {
   background: transparent;
@@ -227,6 +377,14 @@ button:disabled {
 .cvbar .grow {
   flex: 1 1 auto;
 }
+/* Match the CV select control height so the edit + upload buttons line up (point 14) */
+.cvbar .btn-ghost,
+.cvbar .icon-btn {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 input[type="file"] {
   color: var(--muted);
   font: inherit;
@@ -260,6 +418,9 @@ input[type="password"] {
   font: inherit;
   min-width: 130px;
   width: 100%;
+  /* Uniform control height across every filter (point 3); matches the
+     react-select control's 40px min-height. */
+  height: 40px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .input:focus,
@@ -267,7 +428,7 @@ select:focus,
 input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 /* ---- Sticky filter/toolbar card (points 2, 3, 18) ---- */
@@ -412,7 +573,10 @@ input:focus {
 .check-box {
   width: 18px;
   height: 18px;
+  min-width: 18px;
   flex: none;
+  padding: 0; /* override the global button padding so it stays square (point 11) */
+  aspect-ratio: 1;
   background: var(--panel-2);
   border: 1px solid var(--border-2);
   border-radius: 5px;
@@ -421,7 +585,18 @@ input:focus {
   justify-content: center;
   color: var(--accent-ink);
 }
-.check-box[data-state="checked"] {
+/* Radix wraps the tick in an inline indicator; make the icon a block so it
+   sits dead-centre instead of riding the text baseline (near the top). */
+.check-box [data-radix-checkbox-indicator],
+.check-box svg {
+  display: block;
+  line-height: 0;
+}
+.check-box:hover {
+  background: var(--panel-3);
+}
+.check-box[data-state="checked"],
+.check-box[data-state="checked"]:hover {
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -714,6 +889,11 @@ input:focus {
   font-size: 14px;
   padding: 10px 0;
 }
+.letter-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .letter-body {
   width: 100%;
   min-height: 220px;
@@ -730,7 +910,7 @@ input:focus {
 .letter-body:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 .empty {
   color: var(--muted);
@@ -751,6 +931,78 @@ input:focus {
   color: var(--faint);
   font-size: 13px;
   margin-left: 6px;
+}
+.results-bar .spacer {
+  flex: 1 1 auto;
+}
+/* Result count, right-aligned in line with the rerank/export row (point 5). */
+.results-count {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Inline form field errors (point 18) */
+.field-error {
+  color: var(--bad);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.input[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+/* Button spinner (point 19) */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+.btn-spin {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* In-app PDF preview (point 13) */
+.pdf-preview {
+  margin-top: 12px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.pdf-preview .react-pdf__Page {
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.pdf-msg {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 24px 0;
+}
+.cv-textnote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 /* ---- Applications board (points 27, 28, 29) ---- */
@@ -789,7 +1041,7 @@ input:focus {
 }
 .col.drag-over {
   border-color: var(--accent);
-  background: #151b28;
+  background: var(--drag-tint);
 }
 .col-head {
   display: flex;
@@ -946,6 +1198,18 @@ footer {
     transform: translate(-50%, -46%) scale(0.98);
   }
 }
+/* Top-anchored modals start at the same level regardless of height (point 17). */
+.modal.modal-top {
+  top: 9vh;
+  transform: translateX(-50%);
+  animation: popTop 0.15s ease;
+}
+@keyframes popTop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.98);
+  }
+}
 .modal h2 {
   margin: 0 0 6px;
   font-size: 21px;
@@ -1008,10 +1272,15 @@ footer {
   margin-top: 8px;
 }
 
-/* Sliding-pill segmented toggle for the auth modal (point 24, framer-motion) */
+/* Sliding-pill segmented toggle for the auth modal (framer-motion).
+   Layering (point 6): hover highlight (::before) sits BELOW the blue slider so
+   the slider gracefully covers it as it transitions; the label sits ABOVE both.
+   .seg is a stacking context; the slider is z-index 1, the label z-index 2, and
+   the hover ::before is positioned with auto z-index so it paints under both. */
 .seg {
   display: flex;
   position: relative;
+  z-index: 0;
   gap: 4px;
   background: var(--panel-2);
   border-radius: 999px;
@@ -1030,20 +1299,62 @@ footer {
   background: transparent;
   color: var(--muted);
   position: relative;
-  z-index: 1;
   transition: color 0.25s ease;
+}
+.seg-btn:hover {
+  background: transparent; /* override the global button hover rectangle */
+}
+.seg-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--panel-3);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.seg-btn:not(.active):hover::before {
+  opacity: 1;
 }
 .seg-btn.active {
   color: var(--accent-ink);
+}
+.seg-label {
+  position: relative;
+  z-index: 2;
 }
 .seg-slider {
   position: absolute;
   top: 3px;
   bottom: 3px;
-  width: calc(50% - 5px);
+  /* left + width are set from the active segment's measured geometry. */
   background: var(--accent);
   border-radius: 999px;
-  z-index: 0;
+  z-index: 1;
+}
+/* Header tabs variant of the segmented toggle: inline, no modal margins. */
+.tabs-seg {
+  margin: 0;
+  width: auto;
+  border: 1px solid var(--border);
+}
+.tabs-seg .seg-btn {
+  flex: 0 0 auto; /* content-width so the container grows to fit each label + badge */
+  padding: 7px 16px;
+  white-space: nowrap;
+}
+.seg-count {
+  margin-left: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0 7px;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.seg-btn.active .seg-count {
+  background: rgba(8, 19, 43, 0.22);
+  color: var(--accent-ink);
 }
 /* Password rule checklist (point 24) */
 .pw-rules {
@@ -1079,7 +1390,7 @@ footer {
 .dropzone:hover,
 .dropzone.drag {
   border-color: var(--accent);
-  background: #151b28;
+  background: var(--drag-tint);
 }
 .dropzone .dz-icon {
   color: var(--faint);
@@ -1120,9 +1431,14 @@ footer {
   padding: 1px 4px;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+/* Single-select controls are pinned to exactly 40px so they match the native
+   inputs (point 3); multi-selects keep min-height and grow with their pills. */
+.rs__control:not(:has(.rs__value-container--is-multi)) {
+  height: 40px;
+}
 .rs__control--is-focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(110, 168, 254, 0.15);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 .rs__value-container {
   gap: 5px;
@@ -1135,6 +1451,19 @@ footer {
 .rs__input-container,
 .rs__input {
   color: var(--text) !important;
+}
+/* The internal search input must not pick up the global .input box styling
+   (point 3: no border around the text inside the dropdown). */
+.rs__input,
+.rs-container input {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  min-width: 2px !important;
+  width: auto !important;
+  height: auto !important; /* don't inherit the 40px control height */
 }
 /* Double the gap between the dropdown arrow and the box edge (point 5) */
 .rs__indicators {

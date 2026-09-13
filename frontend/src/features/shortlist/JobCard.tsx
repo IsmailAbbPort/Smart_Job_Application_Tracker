@@ -62,6 +62,7 @@ function LetterView({
 }) {
   const [body, setBody] = useState(letter.body);
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const f = letter.fabrication || {};
   const unsupported = (f.claims || []).filter((c) => !c.supported);
   const pct = Math.round((f.grounded_ratio ?? 1) * 100);
@@ -72,6 +73,16 @@ function LetterView({
       onSaved(await api.saveLetter(letter.job_id, body, cvId));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked (e.g. insecure context); nothing to do */
     }
   };
 
@@ -108,9 +119,12 @@ function LetterView({
         </div>
       )}
       <textarea className="letter-body" value={body} onChange={(e) => setBody(e.target.value)} />
-      <div>
+      <div className="letter-actions">
         <button className="assess-btn" onClick={save} disabled={saving}>
           Save edits
+        </button>
+        <button className="assess-btn" onClick={copy}>
+          {copied ? "Copied" : "Copy cover letter"}
         </button>
       </div>
     </div>

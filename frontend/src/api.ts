@@ -43,10 +43,13 @@ export const api = {
     req<Cv>("/cv/upload", { method: "POST", body: body(payload) }),
   updateCv: (id: number, payload: { label: string }) =>
     req<Cv>(`/cv/${id}`, { method: "PATCH", body: body(payload) }),
+  deleteCv: (id: number) => req<unknown>(`/cv/${id}`, { method: "DELETE" }),
   cvFileUrl: (id: number) => `/cv/${id}/file`,
 
-  // ---- Jobs / languages ----
+  // ---- Jobs / filter option sources ----
   languages: () => req<{ code: string; count: number }[]>("/jobs/languages"),
+  cities: () => req<{ name: string; count: number }[]>("/jobs/cities"),
+  countries: () => req<{ name: string; count: number }[]>("/jobs/countries"),
 
   // ---- Preferences ----
   getPrefs: () => req<Preferences>("/preferences"),

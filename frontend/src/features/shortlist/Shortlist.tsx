@@ -1,27 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { api } from "../../api";
+import { Modal } from "../../components/Modal";
 import { Select, type Option } from "../../components/Select";
 import type { Cv, Job, ShortlistResponse, User, Verdict } from "../../types";
-import { Filters, buildLanguageOptions } from "./Filters";
+import { Filters, buildLanguageOptions, buildNameOptions } from "./Filters";
 import { JobCard } from "./JobCard";
 import { CvModal } from "./CvModal";
 import { exportCsv, exportPdf, exportTxt } from "./exports";
 import {
   buildParams,
+  clearStoredFilters,
   defaultFilters,
   filtersToPrefs,
-  prefsToFilters,
+  loadStoredFilters,
+  saveFilters,
   type FilterState,
 } from "./filterState";
 
 const RERANK_N = 10;
 
 export function Shortlist({ user }: { user: User | null }) {
-  const [filters, setFilters] = useState<FilterState>(defaultFilters);
+  const [filters, setFilters] = useState<FilterState>(loadStoredFilters);
   const [cvs, setCvs] = useState<Cv[]>([]);
   const [cvId, setCvId] = useState<string>("");
   const [langOptions, setLangOptions] = useState<Option[]>([]);
+  const [cityOptions, setCityOptions] = useState<Option[]>([]);
+  const [countryOptions, setCountryOptions] = useState<Option[]>([]);
   const [results, setResults] = useState<ShortlistResponse | null>(null);
   const [judged, setJudged] = useState<Record<number, Verdict>>({});
   const [status, setStatus] = useState("");
@@ -30,6 +35,7 @@ export function Shortlist({ user }: { user: User | null }) {
   const [reranking, setReranking] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const set = useCallback(
     <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
@@ -79,22 +85,47 @@ export function Shortlist({ user }: { user: User | null }) {
     }
   }, []);
 
-  // Initial load: CVs, prefs, languages, then the first shortlist.
+  // Persist the whole filter card locally so it survives reloads (point 8).
+  useEffect(() => {
+    saveFilters(filters);
+  }, [filters]);
+
+  // Initial load: CVs + filter option sources, then the first shortlist. Filters
+  // themselves come from localStorage (no server-seeded defaults).
   useEffect(() => {
     (async () => {
       try {
-        const [, prefs] = await Promise.all([loadCvs(), api.getPrefs().catch(() => null)]);
-        if (prefs) setFilters((base) => prefsToFilters(prefs, base));
-        api
-          .languages()
-          .then((l) => setLangOptions(buildLanguageOptions(l)))
-          .catch(() => {});
+        await loadCvs();
+        api.languages().then((l) => setLangOptions(buildLanguageOptions(l))).catch(() => {});
+        api.cities().then((c) => setCityOptions(buildNameOptions(c))).catch(() => {});
+        api.countries().then((c) => setCountryOptions(buildNameOptions(c))).catch(() => {});
       } finally {
         runShortlist();
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const onReset = useCallback(() => {
+    clearStoredFilters();
+    setFilters(defaultFilters);
+    // Run against the cleared filters on the next tick (state is async).
+    setTimeout(runShortlist, 0);
+  }, [runShortlist]);
+
+  const deleteSelectedCv = async () => {
+    const target = cvs.find((c) => String(c.id) === cvId);
+    if (!target) return;
+    setConfirmDelete(false);
+    try {
+      await api.deleteCv(target.id);
+      await loadCvs();
+      say(`Deleted "${target.label}".`);
+      runShortlist();
+    } catch (e) {
+      say("Could not delete CV: " + (e as Error).message, true);
+    }
+  };
 
   const onTrack = useCallback(
     async (jobId: number, statusVal: string) => {
@@ -182,6 +213,14 @@ export function Shortlist({ user }: { user: User | null }) {
         </div>
         <button
           className="icon-btn"
+          title="Delete this CV"
+          disabled={!selectedCv}
+          onClick={() => setConfirmDelete(true)}
+        >
+          <Trash2 size={16} />
+        </button>
+        <button
+          className="icon-btn"
           title="Edit this CV"
           disabled={!selectedCv}
           onClick={() => setEditOpen(true)}
@@ -197,7 +236,10 @@ export function Shortlist({ user }: { user: User | null }) {
         f={filters}
         set={set}
         languageOptions={langOptions}
+        cityOptions={cityOptions}
+        countryOptions={countryOptions}
         onSubmit={runShortlist}
+        onReset={onReset}
         submitting={submitting}
       />
 
@@ -229,6 +271,10 @@ export function Shortlist({ user }: { user: User | null }) {
               PDF
             </button>
           )}
+          <div className="spacer" />
+          <span className="results-count">
+            {items.length} result{items.length === 1 ? "" : "s"}
+          </span>
         </div>
       )}
 
@@ -273,6 +319,30 @@ export function Shortlist({ user }: { user: User | null }) {
           say("CV updated.");
         }}
       />
+
+      <Modal
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        maxWidth={380}
+        title={<h2>Delete CV?</h2>}
+      >
+        <p className="modal-text">
+          {selectedCv ? (
+            <>
+              &ldquo;{selectedCv.label}&rdquo; will be permanently removed. This can&rsquo;t be
+              undone.
+            </>
+          ) : null}
+        </p>
+        <div className="modal-actions">
+          <button className="btn-ghost" onClick={() => setConfirmDelete(false)}>
+            Cancel
+          </button>
+          <button className="btn-primary" onClick={deleteSelectedCv}>
+            Delete
+          </button>
+        </div>
+      </Modal>
     </section>
   );
 }

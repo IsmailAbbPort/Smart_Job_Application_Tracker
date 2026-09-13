@@ -9,18 +9,25 @@ export function Modal({
   title,
   children,
   maxWidth,
+  anchorTop,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title?: ReactNode;
   children: ReactNode;
   maxWidth?: number;
+  // Anchor to a fixed distance from the top (instead of vertical centering) so
+  // modals of different heights start at the same level (point 17).
+  anchorTop?: boolean;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="modal-backdrop" />
-        <Dialog.Content className="modal" style={maxWidth ? { maxWidth } : undefined}>
+        <Dialog.Content
+          className={"modal" + (anchorTop ? " modal-top" : "")}
+          style={maxWidth ? { maxWidth } : undefined}
+        >
           <Dialog.Close asChild>
             <button className="modal-x" aria-label="Close">
               <X size={20} />

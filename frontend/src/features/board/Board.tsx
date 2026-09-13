@@ -96,8 +96,12 @@ export function Board() {
   // refetch and no re-render of the whole board. The DELETE runs in the background.
   const remove = useCallback((jobId: number) => {
     setApps((prev) => prev.filter((a) => a.job.id !== jobId));
-    api.untrack(jobId).catch(() => load());
-    window.dispatchEvent(new CustomEvent("apps-changed-silent"));
+    // Refresh the header count only after the DELETE lands, otherwise the stats
+    // refetch races the delete and reads the stale (pre-removal) total.
+    api
+      .untrack(jobId)
+      .then(() => window.dispatchEvent(new CustomEvent("apps-changed-silent")))
+      .catch(() => load());
   }, [load]);
 
   const changeStatus = useCallback(

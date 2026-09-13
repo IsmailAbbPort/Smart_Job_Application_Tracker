@@ -1,4 +1,3 @@
-import { CAIRO_OFFSET } from "../../constants";
 import type { Preferences } from "../../types";
 
 // One flat object drives the whole filter card. Split into the three quick
@@ -42,7 +41,7 @@ export const defaultFilters: FilterState = {
   region: "",
   language: "",
   knownLangs: [],
-  tzOffset: CAIRO_OFFSET,
+  tzOffset: null,
   minSalary: "",
   currency: "",
   period: "year",
@@ -107,18 +106,38 @@ export function buildParams(f: FilterState, cvId: string): URLSearchParams {
   return p;
 }
 
-// Map preferences from the API into filter state (ported from loadPrefs()).
-export function prefsToFilters(p: Preferences, base: FilterState): FilterState {
-  return {
-    ...base,
-    yearsExp: p.years_experience != null ? String(p.years_experience) : "",
-    tzOffset: p.user_utc_offset ?? CAIRO_OFFSET,
-    knownLangs: p.known_languages ?? [],
-    exclTitles: p.exclude_title_keywords ?? [],
-    roleFamilies: p.include_role_families ?? [],
-    hideSenior: (p.exclude_seniorities ?? []).includes("senior"),
-    hideIntern: (p.exclude_seniorities ?? []).includes("intern"),
-  };
+// --- localStorage persistence (point 8) ---
+// The full filter card is saved locally so it survives reloads without needing
+// an account. Server preferences still mirror these on each run (see
+// filtersToPrefs) so the shortlist's server-side filters match the form.
+const STORAGE_KEY = "sjt.filters";
+
+export function loadStoredFilters(): FilterState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return defaultFilters;
+    const saved = JSON.parse(raw) as Partial<FilterState>;
+    // Merge onto defaults so new fields added later don't break an old save.
+    return { ...defaultFilters, ...saved };
+  } catch {
+    return defaultFilters;
+  }
+}
+
+export function saveFilters(f: FilterState): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(f));
+  } catch {
+    /* storage full / unavailable - non-fatal */
+  }
+}
+
+export function clearStoredFilters(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* non-fatal */
+  }
 }
 
 // Map filter state back to the preferences PUT body (ported from persistPrefs()).

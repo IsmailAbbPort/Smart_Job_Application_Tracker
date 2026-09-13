@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, RotateCcw } from "lucide-react";
 import { Select, type Option } from "../../components/Select";
 import { Checkbox } from "../../components/Checkbox";
 import { TagInput } from "../../components/TagInput";
@@ -40,13 +40,19 @@ export function Filters({
   f,
   set,
   languageOptions,
+  cityOptions,
+  countryOptions,
   onSubmit,
+  onReset,
   submitting,
 }: {
   f: FilterState;
   set: <K extends keyof FilterState>(key: K, value: FilterState[K]) => void;
   languageOptions: Option[];
+  cityOptions: Option[];
+  countryOptions: Option[];
   onSubmit: () => void;
+  onReset: () => void;
   submitting: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -54,9 +60,9 @@ export function Filters({
 
   return (
     <div className="controls-card">
-      {/* Quick filters: Remote / City / Results (point 2) */}
+      {/* Quick filters: Remote / Your Experience / Results (points 1, 2) */}
       <div className="toolbar">
-        <div className="field" style={{ minWidth: 160 }}>
+        <div className="field" style={{ width: 152, minWidth: 152, flex: "none" }}>
           <label>Remote</label>
           <Select
             options={REMOTE_OPTS}
@@ -65,17 +71,19 @@ export function Filters({
             onChange={(o) => set("remote", ((o as Option)?.value ?? "") as FilterState["remote"])}
           />
         </div>
-        <div className="field" style={{ minWidth: 170 }}>
-          <label htmlFor="city">City</label>
+        <div className="field" style={{ width: 152, minWidth: 152, flex: "none" }}>
+          <label htmlFor="years_exp_quick">Your Experience (yrs)</label>
           <input
-            id="city"
+            id="years_exp_quick"
             className="input"
-            value={f.city}
-            placeholder="e.g. Berlin"
-            onChange={(e) => set("city", e.target.value)}
+            type="number"
+            min={0}
+            value={f.yearsExp}
+            placeholder="e.g. 3"
+            onChange={(e) => set("yearsExp", e.target.value)}
           />
         </div>
-        <div className="field" style={{ minWidth: 120 }}>
+        <div className="field" style={{ width: 114, minWidth: 114, flex: "none" }}>
           <label>Results</label>
           <Select
             options={LIMIT_OPTS}
@@ -94,6 +102,9 @@ export function Filters({
           <span className="chev">
             <ChevronDown size={14} />
           </span>
+        </button>
+        <button type="button" className="filters-toggle" onClick={onReset} title="Reset all filters">
+          <RotateCcw size={14} /> Reset
         </button>
         <div className="spacer" />
         <button type="button" className="btn-primary" onClick={onSubmit} disabled={submitting}>
@@ -116,22 +127,6 @@ export function Filters({
                 {/* Location */}
                 <fieldset className="filter-group">
                   <legend>Location</legend>
-                  <TagInput
-                    label="Cities"
-                    values={f.cities}
-                    onChange={(v) => set("cities", v)}
-                    placeholder="Type a city, press Enter"
-                  />
-                  <div className="field">
-                    <label htmlFor="country">Country</label>
-                    <input
-                      id="country"
-                      className="input"
-                      value={f.country}
-                      placeholder="e.g. Germany"
-                      onChange={(e) => set("country", e.target.value)}
-                    />
-                  </div>
                   <Select
                     label="Region"
                     isClearable
@@ -139,6 +134,27 @@ export function Filters({
                     value={pick(REGIONS, f.region)}
                     placeholder="Any region"
                     onChange={(o) => set("region", (o as Option)?.value ?? "")}
+                  />
+                  <Select
+                    label="Country"
+                    isClearable
+                    options={countryOptions}
+                    value={
+                      countryOptions.find((o) => o.value === f.country) ??
+                      (f.country ? { value: f.country, label: f.country } : null)
+                    }
+                    placeholder="Any country"
+                    onChange={(o) => set("country", (o as Option)?.value ?? "")}
+                  />
+                  <Select
+                    label="Cities"
+                    isMulti
+                    options={cityOptions}
+                    value={f.cities.map(
+                      (c) => cityOptions.find((o) => o.value === c) ?? { value: c, label: c },
+                    )}
+                    placeholder="Any city"
+                    onChange={(o) => set("cities", (o as Option[]).map((x) => x.value))}
                   />
                 </fieldset>
 
@@ -154,7 +170,7 @@ export function Filters({
                     onChange={(o) => set("language", (o as Option)?.value ?? "")}
                   />
                   <Select
-                    label="Known Languages"
+                    label="Languages You Speak"
                     isMulti
                     options={KNOWN_LANGUAGE_OPTIONS}
                     value={multi(KNOWN_LANGUAGE_OPTIONS, f.knownLangs)}
@@ -178,52 +194,30 @@ export function Filters({
                   <legend>Compensation &amp; experience</legend>
                   <div className="field">
                     <label htmlFor="min_salary">Min Salary</label>
-                    <div className="salary-row">
-                      <div className="salary-field">
-                        <input
-                          id="min_salary"
-                          className="input"
-                          type="number"
-                          min={0}
-                          value={f.minSalary}
-                          placeholder="any"
-                          onChange={(e) => set("minSalary", e.target.value)}
-                        />
-                      </div>
-                      <div className="currency-field">
-                        <Select
-                          label="Currency"
-                          options={CURRENCIES}
-                          value={pick(CURRENCIES, f.currency)}
-                          isSearchable={false}
-                          onChange={(o) => set("currency", (o as Option)?.value ?? "")}
-                        />
-                      </div>
-                      <div className="period-field">
-                        <label style={{ fontSize: 12, color: "var(--muted)" }}>Period</label>
-                        <Select
-                          options={PERIOD_OPTS}
-                          value={pick(PERIOD_OPTS, f.period)}
-                          isSearchable={false}
-                          onChange={(o) =>
-                            set("period", ((o as Option)?.value ?? "year") as "year" | "month")
-                          }
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="field">
-                    <label htmlFor="years_exp">Your Experience (yrs)</label>
                     <input
-                      id="years_exp"
+                      id="min_salary"
                       className="input"
                       type="number"
                       min={0}
-                      value={f.yearsExp}
-                      placeholder="e.g. 3"
-                      onChange={(e) => set("yearsExp", e.target.value)}
+                      value={f.minSalary}
+                      placeholder="any"
+                      onChange={(e) => set("minSalary", e.target.value)}
                     />
                   </div>
+                  <Select
+                    label="Currency"
+                    options={CURRENCIES}
+                    value={pick(CURRENCIES, f.currency)}
+                    isSearchable={false}
+                    onChange={(o) => set("currency", (o as Option)?.value ?? "")}
+                  />
+                  <Select
+                    label="Period"
+                    options={PERIOD_OPTS}
+                    value={pick(PERIOD_OPTS, f.period)}
+                    isSearchable={false}
+                    onChange={(o) => set("period", ((o as Option)?.value ?? "year") as "year" | "month")}
+                  />
                   <div className="field">
                     <label htmlFor="max_gap">
                       Max Years Above Experience
@@ -292,15 +286,6 @@ export function Filters({
                   </div>
                 </fieldset>
               </div>
-
-              <div className="filters-foot">
-                <Checkbox
-                  checked={f.ignorePrefs}
-                  onChange={(v) => set("ignorePrefs", v)}
-                  label="Ignore Saved Prefs"
-                />
-                <span className="subtle">Filters you set here are saved for next time.</span>
-              </div>
             </div>
           </motion.div>
         )}
@@ -309,9 +294,17 @@ export function Filters({
   );
 }
 
-// Language options are the corpus languages, shown with full names (points 8, 9).
+// Language options are the corpus languages, shown with full names, ordered by
+// frequency (most common first, point 4).
 export function buildLanguageOptions(langs: { code: string; count: number }[]): Option[] {
   return [...langs]
-    .sort((a, b) => a.code.localeCompare(b.code))
+    .sort((a, b) => b.count - a.count)
     .map((l) => ({ value: l.code, label: `${languageName(l.code)} (${l.count})` }));
+}
+
+// Corpus cities/countries -> options, most common first, value = the raw name.
+export function buildNameOptions(rows: { name: string; count: number }[]): Option[] {
+  return [...rows]
+    .sort((a, b) => b.count - a.count)
+    .map((r) => ({ value: r.name, label: `${r.name} (${r.count})` }));
 }
