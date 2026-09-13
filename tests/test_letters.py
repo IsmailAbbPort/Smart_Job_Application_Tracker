@@ -5,10 +5,18 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.ai.cover_letter import FakeDrafter, get_drafter
+from app.ai.cover_letter import AnthropicDrafter, FakeDrafter, get_drafter
 from app.config import Settings
-from app.models import Cv, Job
-from app.schemas import CoverLetterResult
+from app.models import Cv, Job, Match, User
+from app.schemas import (
+    CoverLetterResult,
+    DimensionScores,
+    FabricationCheck,
+    FabricationClaim,
+    MatchedRequirement,
+    MatchTier,
+    MatchVerdict,
+)
 
 
 def _seed(
@@ -50,6 +58,77 @@ def test_get_drafter_requires_key():
     assert exc.value.status_code == 503
 
 
+def _verdict(requirement: str = "FastAPI services") -> MatchVerdict:
+    return MatchVerdict(
+        overall_score=80,
+        verdict=MatchTier.strong,
+        one_line_verdict="strong fit",
+        dimension_scores=DimensionScores(skills=80, seniority=70, domain=75, location_remote=90),
+        matched_requirements=[
+            MatchedRequirement(requirement=requirement, cv_evidence="Built a FastAPI service")
+        ],
+        gaps=[],
+    )
+
+
+def test_fake_drafter_leads_with_match_brief():
+    result = FakeDrafter().write("Python FastAPI engineer", "FastAPI role", _verdict())
+    assert "FastAPI services" in result.body  # led with the judge's evidenced requirement
+    assert result.fabrication.grounded_ratio == 1.0
+
+
+# --- AnthropicDrafter orchestration (network-free: draft/check/revise are stubbed) ---
+
+
+def _check_with(*supported: bool) -> FabricationCheck:
+    return FabricationCheck(
+        claims=[FabricationClaim(claim=f"c{i}", supported=s) for i, s in enumerate(supported)],
+        placeholders=[],
+    )
+
+
+def test_anthropic_drafter_revises_when_unsupported():
+    drafter = AnthropicDrafter(api_key="test")
+    calls = {"draft": 0, "revise": 0, "check": 0}
+    checks = iter([_check_with(False), _check_with(True)])  # first audit dirty, second clean
+
+    def draft(cv, job, verdict):
+        calls["draft"] += 1
+        return "v1"
+
+    def check(cv, letter):
+        calls["check"] += 1
+        return next(checks)
+
+    def revise(cv, letter, report):
+        calls["revise"] += 1
+        return "v2"
+
+    drafter._draft, drafter._check, drafter._revise = draft, check, revise
+
+    result = drafter.write("cv text", "job text")
+    assert calls == {"draft": 1, "revise": 1, "check": 2}  # one revise, then re-audited
+    assert result.body == "v2"
+    assert result.fabrication.unsupported_count == 0
+
+
+def test_anthropic_drafter_skips_revise_when_clean():
+    drafter = AnthropicDrafter(api_key="test")
+    revised = {"n": 0}
+
+    def revise(cv, letter, report):
+        revised["n"] += 1
+        return "x"
+
+    drafter._draft = lambda cv, job, verdict: "clean letter"  # noqa: E731 - test stub
+    drafter._check = lambda cv, letter: _check_with(True)  # noqa: E731 - test stub
+    drafter._revise = revise
+
+    result = drafter.write("cv text", "job text")
+    assert revised["n"] == 0  # nothing unsupported -> no revise pass
+    assert result.body == "clean letter"
+
+
 # --- routes ---
 
 
@@ -67,6 +146,37 @@ def test_draft_persists_and_caches(letter_client, session_factory):
     got = letter_client.get(f"/letters/{job_id}", params={"cv_id": cv_id})
     assert got.status_code == 200
     assert got.json()["body"] == body["body"]
+
+
+def test_draft_grounds_in_stored_match_verdict(letter_client, session_factory):
+    # When a judge verdict exists for (cv, job), the drafter is handed it so the letter
+    # is built around the evidenced matches (here surfaced via the FakeDrafter's lead).
+    cv_id, job_id = _seed(session_factory)
+    with session_factory() as s:
+        s.add(
+            Match(
+                cv_id=cv_id,
+                job_id=job_id,
+                overall_score=82,
+                verdict="strong",
+                one_line_verdict="strong fit",
+                dimension_scores={
+                    "skills": 82,
+                    "seniority": 70,
+                    "domain": 75,
+                    "location_remote": 90,
+                },
+                matched_requirements=[
+                    {"requirement": "FastAPI services", "cv_evidence": "Built a FastAPI service"}
+                ],
+                gaps=[],
+                model="fake-judge",
+            )
+        )
+        s.commit()
+
+    body = letter_client.post(f"/letters/{job_id}", params={"cv_id": cv_id}).json()
+    assert "FastAPI services" in body["body"]
 
 
 def test_save_edit_marks_edited(letter_client, session_factory):
@@ -89,3 +199,39 @@ def test_get_missing_letter_404(letter_client, session_factory):
 def test_draft_missing_job_404(letter_client, session_factory):
     cv_id, _job_id = _seed(session_factory)
     assert letter_client.post("/letters/999999", params={"cv_id": cv_id}).status_code == 404
+
+
+def test_letter_cannot_use_another_owners_cv(letter_client, session_factory):
+    # Regression: _resolve_cv was not owner-scoped, so a signed-in user could draft
+    # (and read/overwrite) a cover letter grounded in another account's CV. All three
+    # routes must now treat another owner's CV as not found.
+    with session_factory() as s:
+        owner_b = User(name="Bee", email="b@b.com", password_hash="x")
+        s.add(owner_b)
+        s.flush()
+        cv = Cv(owner_id=owner_b.id, label="B CV", content="Private resume text of user B")
+        job = Job(
+            source="test",
+            source_id="1",
+            title="Backend Engineer",
+            company="Acme",
+            url="https://example.com/1",
+            description="We need a Python FastAPI Postgres engineer.",
+            is_remote=True,
+            is_european=True,
+        )
+        s.add_all([cv, job])
+        s.commit()
+        cv_id, job_id = cv.id, job.id
+
+    # A is a different signed-in account (owner_id != B).
+    letter_client.post(
+        "/auth/register", json={"name": "Ann", "email": "a@b.com", "password": "secret1!"}
+    )
+    params = {"cv_id": cv_id}
+    assert letter_client.post(f"/letters/{job_id}", params=params).status_code == 404
+    assert letter_client.get(f"/letters/{job_id}", params=params).status_code == 404
+    assert (
+        letter_client.put(f"/letters/{job_id}", params=params, json={"body": "x"}).status_code
+        == 404
+    )
