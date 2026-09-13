@@ -179,6 +179,31 @@ def test_draft_grounds_in_stored_match_verdict(letter_client, session_factory):
     assert "FastAPI services" in body["body"]
 
 
+def test_draft_survives_partial_match_row(letter_client, session_factory):
+    # A partial/legacy Match row (empty JSON sub-fields) must degrade to an ungrounded
+    # draft, not 500: rebuilding MatchVerdict from it raises ValidationError, which the
+    # route now swallows. Regression for the code-review finding.
+    cv_id, job_id = _seed(session_factory)
+    with session_factory() as s:
+        s.add(
+            Match(
+                cv_id=cv_id,
+                job_id=job_id,
+                overall_score=0,
+                verdict="weak",
+                one_line_verdict="",
+                dimension_scores={},  # empty -> DimensionScores validation would fail
+                matched_requirements=[],
+                gaps=[],
+                model="x",
+            )
+        )
+        s.commit()
+
+    resp = letter_client.post(f"/letters/{job_id}", params={"cv_id": cv_id})
+    assert resp.status_code == 200
+
+
 def test_save_edit_marks_edited(letter_client, session_factory):
     cv_id, job_id = _seed(session_factory)
     letter_client.post(f"/letters/{job_id}", params={"cv_id": cv_id})

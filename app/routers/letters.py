@@ -8,6 +8,7 @@ human-in-the-loop that keeps this honest - the app never "sends" anything).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -81,20 +82,22 @@ def draft_letter(
 
     # If the job has already been judged for this CV, ground the letter in that verdict
     # (lead with the evidenced matches, avoid the gaps). None -> the drafter works from
-    # the CV + job alone, exactly as before.
+    # the CV + job alone, exactly as before. A partial/legacy Match row (empty JSON
+    # sub-fields) must degrade to an ungrounded draft, never 500 the draft route.
     match = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
-    verdict = (
-        MatchVerdict(
-            overall_score=match.overall_score,
-            verdict=match.verdict,
-            one_line_verdict=match.one_line_verdict,
-            dimension_scores=match.dimension_scores,
-            matched_requirements=match.matched_requirements,
-            gaps=match.gaps,
-        )
-        if match is not None
-        else None
-    )
+    verdict = None
+    if match is not None:
+        try:
+            verdict = MatchVerdict(
+                overall_score=match.overall_score,
+                verdict=match.verdict,
+                one_line_verdict=match.one_line_verdict,
+                dimension_scores=match.dimension_scores,
+                matched_requirements=match.matched_requirements,
+                gaps=match.gaps,
+            )
+        except ValidationError:
+            verdict = None
 
     with charge(session, request, user.id if user else None, "letter"):
         result = drafter.write(cv.content, build_job_text(job), verdict)

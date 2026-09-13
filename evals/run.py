@@ -76,9 +76,10 @@ def evaluate_matcher(
     ks = list(ks)
     cv_vector = embedder.embed([build_cv_document(cv.content)])[0]
     job_vectors = embedder.embed([build_job_document(p.job) for p in pairs])
+    # Score each pair once, then sort (not cosine-in-the-sort-key, which recomputes it).
     scored = sorted(
-        zip(pairs, job_vectors, strict=True),
-        key=lambda pv: cosine_similarity(cv_vector, pv[1]),
+        ((p, cosine_similarity(cv_vector, vec)) for p, vec in zip(pairs, job_vectors, strict=True)),
+        key=lambda ps: ps[1],
         reverse=True,
     )
     ranked_pairs = [p for p, _ in scored]
@@ -171,7 +172,8 @@ def evaluate_letters(
             qkey = f"{qmodel}:{cv_id}:{pair.id}"
             qcached = None if refresh else quality_cache.get(qkey)
             if qcached is None:
-                qcached = quality_judge.score(build_job_text(pair.job), result.body).model_dump()
+                score = quality_judge.score(build_job_text(pair.job), result.body)
+                qcached = score.model_dump(mode="json")
                 quality_cache.set(qkey, qcached)
             qualities.append(LetterQuality.model_validate(qcached))
 
