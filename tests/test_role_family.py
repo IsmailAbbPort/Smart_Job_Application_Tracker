@@ -81,9 +81,7 @@ def test_classify_titles():
             "Mystery Role": [1.0, 1.0],  # ambiguous -> None
         }
     )
-    out = clf.classify_titles(
-        ["Backend Engineer", "Account Executive", "Mystery Role"], embedder
-    )
+    out = clf.classify_titles(["Backend Engineer", "Account Executive", "Mystery Role"], embedder)
     assert out == ["engineering", "sales", None]
 
 

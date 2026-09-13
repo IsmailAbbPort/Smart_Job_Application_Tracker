@@ -44,3 +44,14 @@ pgdata/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Eval harness local artifacts (the golden set IS committed; these are run outputs)
+evals/.cache/
+evals/results/
+evals/_labels.json
+# Real CV text (personal data) is kept local, never committed; the golden set holds a placeholder.
+evals/cvs.local.json
+
+# Personal working notes (scratch, not part of the project)
+/Must-do for complete.txt
+/Stuff to change.txt

@@ -27,3 +27,21 @@ jobs:
 
       - name: Test (pytest)
         run: uv run pytest
+
+      # Exercise the eval runner itself (metrics + gate thresholds are covered by
+      # pytest above; this proves the CLI wires up offline). Real-API eval runs are
+      # manual/local so CI never spends API budget. See evals/README.md.
+      - name: Eval harness (offline smoke)
+        run: uv run python -m evals.run --offline
+
+  # Build the real production image so a broken import, out-of-date uv.lock, or a
+  # frontend compile/asset error fails CI instead of crashing the deploy. Stage 1
+  # of the Dockerfile runs `npm ci && npm run build` (tsc -b && vite build), so this
+  # gates the frontend build too; stage 2 runs `uv sync --frozen`.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build -t smart-job-tracker:ci .

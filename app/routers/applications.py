@@ -50,8 +50,10 @@ def upsert_application(
     job = session.get(Job, payload.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    if payload.cv_id is not None and session.get(Cv, payload.cv_id) is None:
-        raise HTTPException(status_code=404, detail="cv not found")
+    if payload.cv_id is not None:
+        cv = session.get(Cv, payload.cv_id)
+        if cv is None or cv.owner_id != owner_id:
+            raise HTTPException(status_code=404, detail="cv not found")
 
     app = session.scalar(
         select(Application).where(

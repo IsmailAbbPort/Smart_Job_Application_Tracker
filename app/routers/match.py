@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,7 @@ from app.db import get_session
 from app.ingest.eligibility import timezone_overlap_hours
 from app.models import Cv, Job, Match, SearchPreferences, User
 from app.prefs import get_preferences, preference_filters
+from app.ratelimit import charge
 from app.schemas import (
     JobOut,
     MatchOut,
@@ -122,13 +125,18 @@ def classify_roles(
         families = classifier.classify_titles([j.title for j in jobs], embedder)
         for job, family in zip(jobs, families, strict=True):
             job.role_family = family
-            distribution[family or "unclassified"] = distribution.get(family or "unclassified", 0) + 1
+            key = family or "unclassified"
+            distribution[key] = distribution.get(key, 0) + 1
         session.commit()
 
     remaining = session.scalar(
         select(func.count()).select_from(Job).where(Job.role_family.is_(None))
     )
-    return {"classified": len(jobs), "remaining_unclassified": remaining or 0, "distribution": distribution}
+    return {
+        "classified": len(jobs),
+        "remaining_unclassified": remaining or 0,
+        "distribution": distribution,
+    }
 
 
 @router.get("/shortlist", response_model=ShortlistResponse)
@@ -262,12 +270,24 @@ def shortlist(
     return ShortlistResponse(cv_id=cv.id, count=len(items), items=items)
 
 
-def _judge_and_store(session: Session, judge: Judge, cv: Cv, job: Job, refresh: bool) -> Match:
-    """Judge one (cv, job) and persist the verdict. Returns the cached row unless refresh."""
+def _judge_and_store(
+    session: Session,
+    judge: Judge,
+    cv: Cv,
+    job: Job,
+    refresh: bool,
+    charge_cm: Callable[[], AbstractContextManager[None]] | None = None,
+) -> Match:
+    """Judge one (cv, job) and persist the verdict. Returns the cached row unless refresh.
+
+    charge_cm (when given) wraps the actual LLM call so the rate limiter charges only
+    a real judge invocation, never a cache hit (see app/ratelimit.charge).
+    """
     existing = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
     if existing is not None and not refresh:
         return existing
-    verdict: MatchVerdict = judge.judge(cv.content, build_job_text(job))
+    with charge_cm() if charge_cm else nullcontext():
+        verdict: MatchVerdict = judge.judge(cv.content, build_job_text(job))
     match = existing or Match(cv_id=cv.id, job_id=job.id)
     match.overall_score = verdict.overall_score
     match.verdict = verdict.verdict.value
@@ -285,6 +305,7 @@ def _judge_and_store(session: Session, judge: Judge, cv: Cv, job: Job, refresh: 
 @router.post("/rerank", response_model=list[MatchOut])
 def rerank(
     payload: RerankRequest,
+    request: Request,
     session: Session = Depends(get_session),
     judge: Judge = Depends(get_judge),
     user: User | None = Depends(get_current_user_optional),
@@ -296,13 +317,25 @@ def rerank(
     this reranks exactly the visible set. Cached per (cv, job); capped, and needs
     ANTHROPIC_API_KEY (503 without it).
     """
-    cv = _resolve_cv(session, payload.cv_id, user.id if user else None)
+    owner_id = user.id if user else None
+    cv = _resolve_cv(session, payload.cv_id, owner_id)
     verdicts: list[MatchOut] = []
     for job_id in payload.job_ids[:_MAX_RERANK]:
         job = session.get(Job, job_id)
         if job is None:
             continue
-        verdicts.append(_to_match_out(_judge_and_store(session, judge, cv, job, payload.refresh)))
+        verdicts.append(
+            _to_match_out(
+                _judge_and_store(
+                    session,
+                    judge,
+                    cv,
+                    job,
+                    payload.refresh,
+                    charge_cm=lambda: charge(session, request, owner_id, "judge"),
+                )
+            )
+        )
     # Highest judge score first; cosine order (input order) breaks ties stably.
     verdicts.sort(key=lambda m: m.overall_score, reverse=True)
     return verdicts
@@ -311,6 +344,7 @@ def rerank(
 @router.post("/{job_id}", response_model=MatchOut)
 def judge_job(
     job_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     judge: Judge = Depends(get_judge),
     cv_id: int | None = Query(default=None, description="CV to judge against; defaults to latest"),
@@ -320,13 +354,23 @@ def judge_job(
     """Run the LLM judge on one job (the rerank stage) and persist the verdict.
 
     Cached: returns the stored verdict unless `refresh=true`. Needs ANTHROPIC_API_KEY
-    (503 without it).
+    (503 without it). Rate-limited per day (429 when the cap is hit).
     """
-    cv = _resolve_cv(session, cv_id, user.id if user else None)
+    owner_id = user.id if user else None
+    cv = _resolve_cv(session, cv_id, owner_id)
     job = session.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return _to_match_out(_judge_and_store(session, judge, cv, job, refresh))
+    return _to_match_out(
+        _judge_and_store(
+            session,
+            judge,
+            cv,
+            job,
+            refresh,
+            charge_cm=lambda: charge(session, request, owner_id, "judge"),
+        )
+    )
 
 
 @router.get("/{job_id}", response_model=MatchOut)
@@ -336,9 +380,10 @@ def get_match(
     cv_id: int | None = Query(
         default=None, description="CV whose verdict to fetch; defaults to latest"
     ),
+    user: User | None = Depends(get_current_user_optional),
 ) -> MatchOut:
     """Return the stored judge verdict for a job. 404 if it has not been judged yet."""
-    cv = _resolve_cv(session, cv_id)
+    cv = _resolve_cv(session, cv_id, user.id if user else None)
     match = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job_id))
     if match is None:
         raise HTTPException(status_code=404, detail="not judged yet; POST /match/{job_id} first")

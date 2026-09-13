@@ -168,6 +168,17 @@ def update_cv(
     return _to_out(cv)
 
 
+@router.delete("/{cv_id}", status_code=204)
+def delete_cv(
+    cv_id: int,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> None:
+    cv = _get_owned(cv_id, session, user)
+    session.delete(cv)
+    session.commit()
+
+
 @router.get("/{cv_id}/file")
 def get_cv_file(
     cv_id: int,

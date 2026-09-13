@@ -6,11 +6,12 @@ session; /logout clears it. Passwords are bcrypt-hashed (see app/auth.py).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    COOKIE_NAME,
     clear_session_cookie,
     get_current_user_optional,
     hash_password,
@@ -86,7 +87,17 @@ def login(
 
 
 @router.get("/me", response_model=UserOut | None)
-def me(user: User | None = Depends(get_current_user_optional)) -> User | None:
+def me(
+    request: Request,
+    response: Response,
+    user: User | None = Depends(get_current_user_optional),
+    settings: Settings = Depends(get_settings),
+) -> User | None:
+    # Sliding session: each time an authenticated user loads the app, re-issue the
+    # cookie so its expiry counts from last activity, not from login. An inactive
+    # user still lapses after jwt_expire_days and must sign in again.
+    if user is not None and request.cookies.get(COOKIE_NAME):
+        set_session_cookie(response, user.id, settings)
     return user
 
 

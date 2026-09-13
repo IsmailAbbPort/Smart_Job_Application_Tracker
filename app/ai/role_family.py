@@ -159,9 +159,7 @@ def assign_family(
     job is never filtered out, matching the rest of the preference machinery.
     """
     unit = _normalize(vector)
-    scored = sorted(
-        ((_cosine(unit, c), fam) for fam, c in centroids.items()), reverse=True
-    )
+    scored = sorted(((_cosine(unit, c), fam) for fam, c in centroids.items()), reverse=True)
     if not scored:
         return None
     top_sim, top_fam = scored[0]

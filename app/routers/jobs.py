@@ -95,6 +95,30 @@ def list_languages(session: Session = Depends(get_session)) -> list[dict]:
     return [{"code": code, "count": count} for code, count in rows]
 
 
+@router.get("/cities")
+def list_cities(session: Session = Depends(get_session)) -> list[dict]:
+    """Resolved cities present in the corpus, with counts (for the UI filter)."""
+    rows = session.execute(
+        select(Job.city, func.count())
+        .where(Job.city.is_not(None), Job.city != "")
+        .group_by(Job.city)
+        .order_by(func.count().desc())
+    ).all()
+    return [{"name": name, "count": count} for name, count in rows]
+
+
+@router.get("/countries")
+def list_countries(session: Session = Depends(get_session)) -> list[dict]:
+    """Resolved countries present in the corpus, with counts (for the UI filter)."""
+    rows = session.execute(
+        select(Job.country, func.count())
+        .where(Job.country.is_not(None), Job.country != "")
+        .group_by(Job.country)
+        .order_by(func.count().desc())
+    ).all()
+    return [{"name": name, "count": count} for name, count in rows]
+
+
 @router.get("/{job_id}", response_model=JobDetail)
 def get_job(job_id: int, session: Session = Depends(get_session)) -> JobDetail:
     job = session.get(Job, job_id)

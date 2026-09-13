@@ -41,9 +41,7 @@ def test_concatenated_arrays_and_missing_gaps_fail_without_coercion():
 
 
 def test_coercion_splits_concatenated_arrays_and_recovers_gaps():
-    verdict = MatchVerdict.model_validate(
-        coerce_tool_input(MatchVerdict, _haiku_verdict_payload())
-    )
+    verdict = MatchVerdict.model_validate(coerce_tool_input(MatchVerdict, _haiku_verdict_payload()))
     assert verdict.overall_score == 35
     assert [r.requirement for r in verdict.matched_requirements] == ["Python"]
     # The gaps the model merged into the other field are recovered, not dropped.
@@ -65,7 +63,9 @@ def test_coercion_defaults_truly_missing_list_to_empty():
 
 def test_coercion_handles_raw_newlines_inside_stringified_values():
     # The model leaves literal newlines inside string values; strict JSON rejects them.
-    matched = '[\n  {\n    "requirement": "Owns\nprojects",\n    "cv_evidence": "Led\nteams"\n  }\n]'
+    matched = (
+        '[\n  {\n    "requirement": "Owns\nprojects",\n' '    "cv_evidence": "Led\nteams"\n  }\n]'
+    )
     payload = {
         "overall_score": 60,
         "verdict": "medium",

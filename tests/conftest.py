@@ -9,6 +9,7 @@ until then the models are portable and SQLite is a faithful stand-in.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,13 +19,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import app.models  # noqa: F401 - register tables on Base.metadata
-from app.ai.cover_letter import FakeDrafter, get_drafter
-from app.ai.embedder import FakeEmbedder, get_embedder
-from app.ai.judge import FakeJudge, get_judge
-from app.db import Base, get_session
-from app.ingest.base import CanonicalJob
-from app.main import app as fastapi_app
+# Keep the background ingest scheduler from starting during tests (the TestClient
+# runs the app lifespan). Must be set before app.config is first imported + cached.
+os.environ.setdefault("INGEST_SCHEDULE_ENABLED", "false")
+
+import app.models  # noqa: E402, F401 - register tables on Base.metadata (after env set)
+from app.ai.cover_letter import FakeDrafter, get_drafter  # noqa: E402
+from app.ai.embedder import FakeEmbedder, get_embedder  # noqa: E402
+from app.ai.judge import FakeJudge, get_judge  # noqa: E402
+from app.db import Base, get_session  # noqa: E402
+from app.ingest.base import CanonicalJob  # noqa: E402
+from app.main import app as fastapi_app  # noqa: E402
 
 # Small embedding dim for fast, readable tests (real runtime uses 1536).
 TEST_EMBED_DIM = 8

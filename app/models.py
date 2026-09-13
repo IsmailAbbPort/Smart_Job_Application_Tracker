@@ -11,11 +11,12 @@ column arrives in Phase 2 via a later migration.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -318,6 +319,28 @@ class Application(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class AiUsage(Base):
+    """Per-day counter of paid AI calls, powering the rate limiter (ratelimit.py).
+
+    `identity` is 'user:<id>' for a signed-in account or 'ip:<addr>' for a guest;
+    `action` is the paid operation ('judge' | 'letter'); one row per (identity,
+    action, day) holds that day's count. The reset is implicit: a new UTC day is a
+    new row, so nothing needs to be purged for the limit to lift.
+    """
+
+    __tablename__ = "ai_usage"
+    __table_args__ = (
+        UniqueConstraint("identity", "action", "day", name="uq_ai_usage_identity_action_day"),
+        Index("ix_ai_usage_action_day", "action", "day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    identity: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class TargetCompany(Base):
