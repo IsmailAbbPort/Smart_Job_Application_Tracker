@@ -13,6 +13,7 @@ const API_PROXY_PATHS = [
   "/letters",
   "/targets",
   "/auth",
+  "/views",
   "/health",
   "/ready",
 ];

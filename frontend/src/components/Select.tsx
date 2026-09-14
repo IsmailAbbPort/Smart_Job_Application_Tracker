@@ -1,4 +1,6 @@
+import { useContext } from "react";
 import ReactSelect, { type Props as SelectProps } from "react-select";
+import { PortalTargetContext } from "./Modal";
 import { HelpTip } from "./HelpTip";
 
 export interface Option {
@@ -17,6 +19,7 @@ type BaseProps = {
 } & SelectProps<Option, boolean>;
 
 export function Select({ label, help, id, ...props }: BaseProps) {
+  const dialog = useContext(PortalTargetContext);
   const control = (
     <ReactSelect<Option, boolean>
       classNamePrefix="rs"
@@ -25,10 +28,10 @@ export function Select({ label, help, id, ...props }: BaseProps) {
       inputId={id}
       placeholder={props.placeholder ?? "Select..."}
       noOptionsMessage={() => "No matches"}
-      // Portal the menu to <body> so it renders above the sticky filter card
-      // (point 15); auto placement flips it up when there's no room below
-      // (point 2); fixed position keeps it attached to the control on scroll.
-      menuPortalTarget={typeof document !== "undefined" ? document.body : undefined}
+      // Portal the menu so it escapes scrolling containers (into the open dialog
+      // when inside one, else <body>); auto placement flips it up when there's no
+      // room below; fixed position keeps it attached to the control on scroll.
+      menuPortalTarget={dialog ?? (typeof document !== "undefined" ? document.body : undefined)}
       menuPosition="fixed"
       menuPlacement="auto"
       styles={{ menuPortal: (base) => ({ ...base, zIndex: 9999 }) }}

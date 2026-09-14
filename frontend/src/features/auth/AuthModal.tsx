@@ -29,7 +29,12 @@ export function AuthModal({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [errs, setErrs] = useState<{ name?: string; email?: string; password?: string; form?: string }>({});
+  const [errs, setErrs] = useState<{
+    name?: string;
+    email?: string;
+    password?: string;
+    form?: string;
+  }>({});
   const [busy, setBusy] = useState(false);
 
   const switchMode = (m: Mode) => {
@@ -78,90 +83,99 @@ export function AuthModal({
       open={open}
       onOpenChange={onOpenChange}
       anchorTop
-      title={<h2>Hi! Let&rsquo;s find you a better job!</h2>}
+      maxWidth={420}
+      title="Save your job search"
     >
-      <p className="modal-text">
-        An account isn&rsquo;t necessary to use this tool. But if you&rsquo;d like your shortlist,
-        applications, and preferences saved for another session, you can create one.
-      </p>
+      <div className="modal-b">
+        <p className="modal-text">
+          An account isn&rsquo;t necessary to use this tool. But if you&rsquo;d like your shortlist,
+          applications, and preferences saved for another session, you can create one.
+        </p>
 
-      <SegmentedToggle
-        value={mode}
-        onChange={(v) => switchMode(v as Mode)}
-        options={[
-          { value: "signup", label: "Sign up" },
-          { value: "login", label: "Log in" },
-        ]}
-      />
+        <SegmentedToggle
+          value={mode}
+          onChange={(v) => switchMode(v as Mode)}
+          options={[
+            { value: "signup", label: "Sign up" },
+            { value: "login", label: "Log in" },
+          ]}
+        />
 
-      {/* noValidate suppresses Chrome's native bubbles; we show inline errors (point 18) */}
-      <form onSubmit={submit} noValidate>
-        {mode === "signup" && (
+        {/* noValidate suppresses Chrome's native bubbles; we show inline errors (point 18) */}
+        <form onSubmit={submit} noValidate>
+          {mode === "signup" && (
+            <div className="field">
+              <input
+                className="input"
+                placeholder="Your Name"
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                aria-invalid={!!errs.name}
+              />
+              {errs.name && <div className="field-error">{errs.name}</div>}
+            </div>
+          )}
           <div className="field">
             <input
               className="input"
-              placeholder="Your Name"
-              autoComplete="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={!!errs.name}
+              type="email"
+              placeholder="you@example.com"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={!!errs.email}
             />
-            {errs.name && <div className="field-error">{errs.name}</div>}
+            {errs.email && <div className="field-error">{errs.email}</div>}
           </div>
-        )}
-        <div className="field">
-          <input
-            className="input"
-            type="email"
-            placeholder="you@example.com"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            aria-invalid={!!errs.email}
-          />
-          {errs.email && <div className="field-error">{errs.email}</div>}
-        </div>
-        <div className="field">
-          <input
-            className="input"
-            type="password"
-            placeholder="Password"
-            autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            aria-invalid={!!errs.password}
-          />
-          {errs.password && <div className="field-error">{errs.password}</div>}
-        </div>
-        {mode === "signup" && (
-          <ul className="pw-rules">
-            {rules.map((r) => {
-              const met = r.test(password);
-              return (
-                <li key={r.label} className={met ? "met" : ""}>
-                  <Check size={13} strokeWidth={met ? 3 : 2} /> {r.label}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <button type="submit" className="btn-primary" disabled={busy}>
-          {busy ? (
-            <span className="btn-spin">
-              <Loader2 size={16} className="spin" /> {mode === "login" ? "Logging in..." : "Signing up..."}
-            </span>
-          ) : mode === "login" ? (
-            "Log in"
-          ) : (
-            "Sign up"
+          <div className="field">
+            <input
+              className="input"
+              type="password"
+              placeholder="Password"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={!!errs.password}
+            />
+            {errs.password && <div className="field-error">{errs.password}</div>}
+          </div>
+          {mode === "signup" && (
+            <ul className="pw-rules">
+              {rules.map((r) => {
+                const met = r.test(password);
+                return (
+                  <li key={r.label} className={met ? "met" : ""}>
+                    <Check size={13} strokeWidth={met ? 3 : 2} /> {r.label}
+                  </li>
+                );
+              })}
+            </ul>
           )}
-        </button>
-      </form>
+          <button
+            type="submit"
+            className="btn primary"
+            style={{ height: 34, justifyContent: "center" }}
+            disabled={busy}
+          >
+            {busy ? (
+              <span className="btn-spin">
+                <Loader2 size={16} className="spin" />{" "}
+                {mode === "login" ? "Logging in..." : "Signing up..."}
+              </span>
+            ) : mode === "login" ? (
+              "Log in"
+            ) : (
+              "Sign up"
+            )}
+          </button>
+        </form>
 
-      {errs.form && <div className="modal-msg err">{errs.form}</div>}
-      <button className="modal-skip" onClick={() => onOpenChange(false)}>
-        Continue without an account &rarr;
-      </button>
+        {errs.form && <div className="modal-msg err">{errs.form}</div>}
+        <button className="modal-skip" onClick={() => onOpenChange(false)}>
+          Continue without an account
+        </button>
+      </div>
     </Modal>
   );
 }

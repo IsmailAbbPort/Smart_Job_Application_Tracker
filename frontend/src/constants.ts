@@ -1,23 +1,25 @@
 import type { Status } from "./types";
 
-// Pipeline stages, in board order, each with a colour accent (ported 1:1).
-export const STAGES: { key: Status; color: string }[] = [
-  { key: "saved", color: "#9aa3b2" },
-  { key: "applied", color: "#6ea8fe" },
-  { key: "screening", color: "#a78bfa" },
-  { key: "interview", color: "#fbbf24" },
-  { key: "offer", color: "#4ade80" },
-  { key: "rejected", color: "#f87171" },
-  { key: "ghosted", color: "#6b7280" },
-  { key: "withdrawn", color: "#6b7280" },
+// Pipeline stages, in board order. Colours are theme tokens (see theme.css --st-*).
+export const STAGES: { key: Status; label: string; color: string }[] = [
+  { key: "saved", label: "Saved", color: "var(--st-saved)" },
+  { key: "applied", label: "Applied", color: "var(--st-applied)" },
+  { key: "screening", label: "Screening", color: "var(--st-screening)" },
+  { key: "interview", label: "Interview", color: "var(--st-interview)" },
+  { key: "offer", label: "Offer", color: "var(--st-offer)" },
+  { key: "rejected", label: "Rejected", color: "var(--st-rejected)" },
+  { key: "ghosted", label: "Ghosted", color: "var(--st-ghosted)" },
+  { key: "withdrawn", label: "Withdrawn", color: "var(--st-withdrawn)" },
 ];
+
+export const stageOf = (key?: string | null) => STAGES.find((s) => s.key === key);
 
 export const STATUSES = STAGES.map((s) => s.key);
 
 export const EFFORT_LABELS: Record<string, string> = {
-  cover_letter: "cover letter",
-  coding_challenge: "coding challenge",
-  portfolio: "portfolio",
+  cover_letter: "Cover letter",
+  coding_challenge: "Coding challenge",
+  portfolio: "Portfolio",
 };
 
 // Continents for the region filter (point 4). Value is a stable slug the backend

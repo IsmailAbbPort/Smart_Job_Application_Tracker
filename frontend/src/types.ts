@@ -93,6 +93,24 @@ export interface Preferences {
   exclude_seniorities?: string[];
 }
 
+export interface SavedView {
+  id: number;
+  name: string;
+  filters: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManualApplicationInput {
+  title: string;
+  company: string;
+  url: string;
+  location: string | null;
+  description: string;
+  is_remote: boolean;
+  status: Status;
+}
+
 export interface User {
   id: number;
   name: string;

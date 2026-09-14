@@ -1,77 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Search } from "lucide-react";
 import { api } from "../../api";
-import { STAGES, STATUSES } from "../../constants";
-import { fmtDate, fmtSalary, locationText } from "../../format";
-import { Select, type Option } from "../../components/Select";
+import { STAGES } from "../../constants";
+import { fmtDate } from "../../format";
 import type { Application } from "../../types";
+import { JobInspector } from "../inspector/JobInspector";
+import { AddApplicationModal } from "./AddApplicationModal";
 
-const STATUS_OPTS: Option[] = STATUSES.map((s) => ({ value: s, label: s }));
-
-function AppCard({
-  app,
-  onDragStart,
-  onRemove,
-  onStatus,
-}: {
-  app: Application;
-  onDragStart: (jobId: number, from: string) => void;
-  onRemove: (jobId: number) => void;
-  onStatus: (jobId: number, status: string) => void;
-}) {
-  const job = app.job;
-  const bits = [locationText(job)];
-  const sal = fmtSalary(job);
-  if (sal) bits.push(sal);
-  if (app.applied_at) bits.push("applied " + fmtDate(app.applied_at));
-
-  return (
-    <div
-      className="appcard"
-      draggable
-      onDragStart={(e) => {
-        // Let the status dropdown / remove button work without starting a drag.
-        if ((e.target as HTMLElement).closest(".appstatus, .rm")) {
-          e.preventDefault();
-          return;
-        }
-        onDragStart(job.id, app.status);
-      }}
-    >
-      <button className="rm" title="Untrack" onClick={() => onRemove(job.id)}>
-        <X size={15} />
-      </button>
-      <div className="t">
-        <a href={job.url} target="_blank" rel="noopener">
-          {job.title}
-        </a>
-      </div>
-      <div className="c">
-        {job.company} <span className="jobid">#{job.id}</span>
-      </div>
-      <div className="m">
-        {bits.map((b, i) => (
-          <span key={i}>{b}</span>
-        ))}
-      </div>
-      <div className="appstatus">
-        <Select
-          options={STATUS_OPTS}
-          value={STATUS_OPTS.find((o) => o.value === app.status) ?? null}
-          isSearchable={false}
-          menuPlacement="auto"
-          onChange={(o) => onStatus(job.id, (o as Option)?.value ?? app.status)}
-        />
-      </div>
-    </div>
-  );
-}
-
-export function Board() {
+export function Board({ cvId }: { cvId: string }) {
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addStage, setAddStage] = useState<string>("saved");
   const drag = useRef<{ jobId: number; from: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -92,22 +36,38 @@ export function Board() {
     return () => window.removeEventListener("apps-changed", onChanged);
   }, [load]);
 
-  // Seamless remove (point 29): drop the card from local state immediately, no
-  // refetch and no re-render of the whole board. The DELETE runs in the background.
-  const remove = useCallback((jobId: number) => {
-    setApps((prev) => prev.filter((a) => a.job.id !== jobId));
-    // Refresh the header count only after the DELETE lands, otherwise the stats
-    // refetch races the delete and reads the stale (pre-removal) total.
-    api
-      .untrack(jobId)
-      .then(() => window.dispatchEvent(new CustomEvent("apps-changed-silent")))
-      .catch(() => load());
-  }, [load]);
+  useEffect(() => {
+    if (openId == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !(e.target as HTMLElement).closest("[role=dialog]"))
+        setOpenId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openId]);
 
+  // Optimistic: move/remove locally first, then sync. The header counts refresh
+  // only after the request lands so the stats read never races the write.
   const changeStatus = useCallback(
     (jobId: number, status: string) => {
-      setApps((prev) => prev.map((a) => (a.job.id === jobId ? { ...a, status } : a)));
-      api.track(jobId, status).catch(() => load());
+      if (!status) {
+        setApps((prev) => prev.filter((a) => a.job.id !== jobId));
+        setOpenId((cur) => (cur === jobId ? null : cur));
+        api
+          .untrack(jobId)
+          .then(() => window.dispatchEvent(new CustomEvent("apps-changed-silent")))
+          .catch(() => load());
+        return;
+      }
+      setApps((prev) =>
+        prev.map((a) =>
+          a.job.id === jobId ? { ...a, status, job: { ...a.job, application_status: status } } : a,
+        ),
+      );
+      api
+        .track(jobId, status)
+        .then(() => window.dispatchEvent(new CustomEvent("apps-changed-silent")))
+        .catch(() => load());
     },
     [load],
   );
@@ -119,71 +79,152 @@ export function Board() {
     if (d && target && target !== d.from) changeStatus(d.jobId, target);
   };
 
-  const total = apps.length;
+  const q = query.trim().toLowerCase();
+  const visible = useMemo(
+    () =>
+      q
+        ? apps.filter((a) =>
+            [a.job.title, a.job.company, a.job.city, a.job.country, a.job.location]
+              .filter(Boolean)
+              .some((s) => s!.toLowerCase().includes(q)),
+          )
+        : apps,
+    [apps, q],
+  );
+  const active = apps.filter((a) =>
+    ["applied", "screening", "interview", "offer"].includes(a.status),
+  ).length;
+  const open = apps.find((a) => a.job.id === openId) ?? null;
 
   return (
-    <section>
-      <div className="board-bar">
-        <span className="summary">
-          {total
-            ? `${total} tracked application${total === 1 ? "" : "s"}`
-            : "No applications tracked yet, try adding some from the Shortlist tab."}
-        </span>
-        <button className="assess-btn" onClick={load}>
-          Refresh
-        </button>
-        <span className="hint">Drag a card between columns to change its stage.</span>
-      </div>
-
-      {loading ? (
-        <div className="empty">Loading applications...</div>
-      ) : err ? (
-        <div className="empty">{err}</div>
-      ) : (
-        <div className="board scroll-themed">
-          {STAGES.map((s) => {
-            const items = apps.filter((a) => a.status === s.key);
-            return (
-              <div
-                key={s.key}
-                className={"col" + (dragOver === s.key ? " drag-over" : "")}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDragOver(s.key);
-                }}
-                onDragLeave={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  drop(s.key);
-                }}
-              >
-                <div className="col-head">
-                  <span className="swatch" style={{ background: s.color }} />
-                  <span className="name">{s.key}</span>
-                  <span className="cnt">{items.length}</span>
-                </div>
-                <div className="col-body scroll-themed">
-                  {items.length ? (
-                    items.map((a) => (
-                      <AppCard
-                        key={a.job.id}
-                        app={a}
-                        onDragStart={(jobId, from) => (drag.current = { jobId, from })}
-                        onRemove={remove}
-                        onStatus={changeStatus}
-                      />
-                    ))
-                  ) : (
-                    <div className="col-empty">- empty -</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+    <>
+      <main>
+        <div className="top">
+          <h1>Applications</h1>
+          <div className="spacer" />
+          <button
+            className="btn primary"
+            onClick={() => {
+              setAddStage("saved");
+              setAddOpen(true);
+            }}
+          >
+            <Plus size={14} /> Add application
+          </button>
         </div>
+        <div className="toolbar">
+          <label className="search">
+            <Search size={14} />
+            <input
+              placeholder="Search by role, company or place"
+              size={32}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          <span className="meta num">
+            {q ? `${visible.length} of ${apps.length} shown · ` : ""}
+            {apps.length} tracked · {active} active · drag a card to change its stage
+          </span>
+        </div>
+        {err && <div className="banner error">{err}</div>}
+
+        {loading ? (
+          <div className="empty">Loading applications...</div>
+        ) : (
+          <div className="board scroll-themed">
+            {STAGES.map((s) => {
+              const items = visible.filter((a) => a.status === s.key);
+              return (
+                <div
+                  key={s.key}
+                  className={"col" + (dragOver === s.key ? " drag-over" : "")}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(s.key);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    drop(s.key);
+                  }}
+                >
+                  <div className="col-h">
+                    <span className="dot" style={{ background: s.color }} />
+                    {s.label}
+                    <span className="c num">{items.length}</span>
+                    <span className="spacer" />
+                    <button
+                      className="iconbtn bare"
+                      style={{ width: 22, height: 22 }}
+                      title={`Add to ${s.label}`}
+                      onClick={() => {
+                        setAddStage(s.key);
+                        setAddOpen(true);
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                  <div className="col-body scroll-themed">
+                    {items.length ? (
+                      items.map((a) => (
+                        <button
+                          key={a.job.id}
+                          className={"appcard" + (a.job.id === openId ? " sel" : "")}
+                          draggable
+                          onDragStart={() => (drag.current = { jobId: a.job.id, from: a.status })}
+                          onClick={() => setOpenId(a.job.id)}
+                        >
+                          <div className="t">{a.job.title}</div>
+                          <div className="c">
+                            {a.job.company}
+                            {a.job.city || a.job.country || a.job.location
+                              ? ` · ${a.job.city || a.job.country || a.job.location}`
+                              : ""}
+                          </div>
+                          <div className="m">
+                            <span className="num">
+                              {a.applied_at
+                                ? "Applied " + fmtDate(a.applied_at)
+                                : "Not applied yet"}
+                            </span>
+                            {a.job.source === "manual" && <span className="tag">Manual</span>}
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="col-empty">{q ? "No matches" : "No applications"}</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {open && (
+        <JobInspector
+          drawer
+          job={{ ...open.job, application_status: open.status }}
+          cvId={cvId}
+          onStatus={changeStatus}
+          onClose={() => setOpenId(null)}
+        />
       )}
-    </section>
+
+      <AddApplicationModal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        initialStatus={addStage}
+        onAdded={(app) => {
+          setApps((prev) => [app, ...prev]);
+          window.dispatchEvent(new CustomEvent("apps-changed-silent"));
+        }}
+      />
+    </>
   );
 }
