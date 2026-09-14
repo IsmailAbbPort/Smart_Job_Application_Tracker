@@ -37,7 +37,7 @@ def run_daily_pipeline() -> dict:
     from app.ai.embedder import OpenAIEmbedder, build_job_document
     from app.ai.role_family import RoleClassifier
     from app.ingest.runner import ingest_all
-    from app.models import Job
+    from app.models import MANUAL_SOURCE, Job
 
     settings = get_settings()
     summary: dict = {}
@@ -56,7 +56,9 @@ def run_daily_pipeline() -> dict:
         )
 
         jobs = session.scalars(
-            select(Job).where(Job.embedding.is_(None)).limit(settings.ingest_embed_limit)
+            select(Job)
+            .where(Job.embedding.is_(None), Job.source != MANUAL_SOURCE)
+            .limit(settings.ingest_embed_limit)
         ).all()
         if jobs:
             vectors = embedder.embed([build_job_document(j) for j in jobs])
@@ -66,7 +68,9 @@ def run_daily_pipeline() -> dict:
         summary["embedded"] = len(jobs)
 
         unclassified = session.scalars(
-            select(Job).where(Job.role_family.is_(None)).limit(settings.ingest_classify_limit)
+            select(Job)
+            .where(Job.role_family.is_(None), Job.source != MANUAL_SOURCE)
+            .limit(settings.ingest_classify_limit)
         ).all()
         if unclassified:
             classifier = RoleClassifier.from_embedder(

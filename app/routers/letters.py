@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.ai.cover_letter import Drafter, get_drafter
 from app.ai.judge import build_job_text
+from app.applications import job_visible_to
 from app.auth import get_current_user_optional
 from app.db import get_session
 from app.models import CoverLetter, Cv, Job, Match, User
@@ -71,7 +72,7 @@ def draft_letter(
     """
     cv = _resolve_cv(session, cv_id, user.id if user else None)
     job = session.get(Job, job_id)
-    if job is None:
+    if job is None or not job_visible_to(session, job, user.id if user else None):
         raise HTTPException(status_code=404, detail="job not found")
 
     existing = session.scalar(

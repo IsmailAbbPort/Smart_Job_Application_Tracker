@@ -18,7 +18,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Application, Job
+from app.models import MANUAL_SOURCE, Application, Job
 
 _USER_AGENT = "SmartJobTracker/0.1 (portfolio project; liveness check)"
 _TIMEOUT = 15.0
@@ -76,7 +76,10 @@ def prune_dead_jobs(
     counts plus a sample of the dead job ids so a dry run is informative.
     """
     tracked = set(session.scalars(select(Application.job_id)))
-    jobs = session.scalars(select(Job).order_by(Job.id).limit(limit)).all()
+    # Manual jobs are the user's own record (often with no URL): never scanned or pruned.
+    jobs = session.scalars(
+        select(Job).where(Job.source != MANUAL_SOURCE).order_by(Job.id).limit(limit)
+    ).all()
 
     owns_client = client is None
     client = client or httpx.Client(

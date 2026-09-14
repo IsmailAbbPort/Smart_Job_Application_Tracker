@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import app as fastapi_app
+from app.models import CoverLetter, Cv, Job, Match
 from app.routers.cv import MAX_CV_BYTES
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -167,3 +168,121 @@ def test_cv_is_owner_scoped(embed_client, session_factory):
 
     # Guest still sees only their own, unaffected.
     assert [c["id"] for c in embed_client.get("/cv").json()] == [guest_cv["id"]]
+
+
+# --- PUT /{cv_id}/file (replace the file) ---
+
+
+def _replace(client, cv_id, filename="new.txt", data=b"Go and Rust engineer."):
+    return client.put(
+        f"/cv/{cv_id}/file", json={"filename": filename, "content_base64": _b64(data)}
+    )
+
+
+def _seed_match_and_letter(session_factory, cv_id) -> None:
+    with session_factory() as s:
+        job = Job(
+            source="test",
+            source_id="1",
+            title="Engineer",
+            company="Acme",
+            url="https://example.com/1",
+            is_remote=True,
+            is_european=True,
+        )
+        s.add(job)
+        s.flush()
+        s.add(
+            Match(
+                cv_id=cv_id,
+                job_id=job.id,
+                overall_score=80,
+                verdict="strong",
+                one_line_verdict="fit",
+                model="fake-judge",
+            )
+        )
+        s.add(CoverLetter(cv_id=cv_id, job_id=job.id, body="Dear Acme", model="fake-drafter"))
+        s.commit()
+
+
+def test_replace_file_reembeds_and_keeps_label(embed_client, session_factory):
+    cv = _upload(embed_client, label="main", data=b"Python engineer.").json()
+    with session_factory() as s:
+        old_embedding = list(s.get(Cv, cv["id"]).embedding)
+
+    resp = _replace(embed_client, cv["id"], filename="new.txt", data=b"Go and Rust engineer.")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == cv["id"]
+    assert body["label"] == "main"  # kept
+    assert body["filename"] == "new.txt"
+    assert body["content_type"] == "text/plain"
+    assert body["size_bytes"] == len(b"Go and Rust engineer.")
+    assert body["embedded"] is True
+
+    assert embed_client.get(f"/cv/{cv['id']}").json()["content"] == "Go and Rust engineer."
+    assert embed_client.get(f"/cv/{cv['id']}/file").content == b"Go and Rust engineer."
+    with session_factory() as s:
+        assert list(s.get(Cv, cv["id"]).embedding) != old_embedding
+
+
+def test_replace_file_accepts_pdf(embed_client):
+    cv = _upload(embed_client).json()
+    pdf = (FIXTURES / "sample_cv.pdf").read_bytes()
+    body = _replace(embed_client, cv["id"], filename="cv.pdf", data=pdf).json()
+    assert body["content_type"] == "application/pdf"
+    assert body["size_bytes"] == len(pdf)
+
+
+def test_replace_file_clears_matches_and_letters(embed_client, session_factory):
+    cv = _upload(embed_client).json()
+    _seed_match_and_letter(session_factory, cv["id"])
+
+    assert _replace(embed_client, cv["id"]).status_code == 200
+
+    # Verdicts and letters grounded in the old text are stale, so they are dropped.
+    with session_factory() as s:
+        assert s.query(Match).filter_by(cv_id=cv["id"]).count() == 0
+        assert s.query(CoverLetter).filter_by(cv_id=cv["id"]).count() == 0
+
+
+def test_replace_file_keeps_other_cvs_verdicts(embed_client, session_factory):
+    cv = _upload(embed_client).json()
+    other = _upload(embed_client, label="other").json()
+    _seed_match_and_letter(session_factory, other["id"])
+
+    assert _replace(embed_client, cv["id"]).status_code == 200
+
+    with session_factory() as s:
+        assert s.query(Match).filter_by(cv_id=other["id"]).count() == 1
+        assert s.query(CoverLetter).filter_by(cv_id=other["id"]).count() == 1
+
+
+def test_replace_file_rejects_bad_file(embed_client):
+    cv = _upload(embed_client, data=b"Python engineer.").json()
+    assert _replace(embed_client, cv["id"], filename="cv.docx", data=b"x").status_code == 422
+    assert _replace(embed_client, cv["id"], data=b"   ").status_code == 422
+    big = b"x" * (MAX_CV_BYTES + 1)
+    assert _replace(embed_client, cv["id"], data=big).status_code == 413
+    resp = embed_client.put(
+        f"/cv/{cv['id']}/file", json={"filename": "cv.txt", "content_base64": "@@@"}
+    )
+    assert resp.status_code == 422
+    # A rejected replace leaves the original file in place.
+    assert embed_client.get(f"/cv/{cv['id']}/file").content == b"Python engineer."
+
+
+def test_replace_file_missing_cv_404(embed_client):
+    assert _replace(embed_client, 999999).status_code == 404
+
+
+def test_replace_file_is_owner_scoped(embed_client):
+    guest_cv = _upload(embed_client, data=b"Guest engineer.").json()
+    with TestClient(fastapi_app) as user:
+        user.post(
+            "/auth/register",
+            json={"name": "Ann", "email": "a@b.com", "password": "secret1!"},
+        )
+        assert _replace(user, guest_cv["id"]).status_code == 404
+    assert embed_client.get(f"/cv/{guest_cv['id']}/file").content == b"Guest engineer."

@@ -33,6 +33,10 @@ from app.db import Base, EmbeddingType
 
 EMBED_DIM = 1536
 
+# Job.source for postings a user added by hand (POST /applications/manual). They are
+# private to that user's pipeline, so every corpus listing/processing query skips them.
+MANUAL_SOURCE = "manual"
+
 
 class Job(Base):
     __tablename__ = "job"
@@ -313,6 +317,29 @@ class Application(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="saved")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SavedView(Base):
+    """A named filter preset the user can re-apply in the UI.
+
+    `filters` is an opaque JSON blob owned by the frontend; the API stores and
+    returns it without interpreting it.
+    """
+
+    __tablename__ = "saved_view"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_account.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    filters: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

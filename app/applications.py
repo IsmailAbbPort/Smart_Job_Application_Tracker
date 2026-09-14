@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Application
+from app.models import MANUAL_SOURCE, Application, Job
 from app.schemas import JobOut
 
 
@@ -37,3 +37,17 @@ def annotate_application_status(
     statuses = application_status_map(session, (item.id for item in items), owner_id)
     for item in items:
         item.application_status = statuses.get(item.id)
+
+
+def job_visible_to(session: Session, job: Job, owner_id: int | None = None) -> bool:
+    """False for a manually added job the owner is not tracking.
+
+    Manual jobs are private to the pipeline that created them, so routes treat
+    another owner's manual job exactly like a missing one (404), never leaking it.
+    """
+    if job.source != MANUAL_SOURCE:
+        return True
+    tracked = session.scalar(
+        select(Application.id).where(Application.job_id == job.id, Application.owner_id == owner_id)
+    )
+    return tracked is not None

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from app.models import Cv, Job
+from fastapi.testclient import TestClient
+
+from app.main import app as fastapi_app
+from app.models import MANUAL_SOURCE, Cv, Job
 
 
 def _job(sid, *, embedding=None) -> Job:
@@ -96,6 +99,8 @@ def test_untrack(client, session_factory):
     client.post("/applications", json={"job_id": job_id, "status": "saved"})
     assert client.delete(f"/applications/{job_id}").status_code == 204
     assert client.get(f"/applications/{job_id}").status_code == 404
+    with session_factory() as s:
+        assert s.get(Job, job_id) is not None  # a corpus job outlives the untrack
 
 
 def test_jobs_annotated_with_application_status(client, session_factory):
@@ -115,3 +120,103 @@ def test_shortlist_annotated_with_application_status(client, session_factory):
 
     items = client.get("/match/shortlist").json()["items"]
     assert items[0]["application_status"] == "applied"
+
+
+# --- manually added applications ---
+
+
+def _manual(client, **overrides):
+    payload = {"title": "Platform Engineer", "company": "Side Project GmbH", **overrides}
+    return client.post("/applications/manual", json=payload)
+
+
+def test_manual_application_created_and_listed(client, session_factory):
+    resp = _manual(
+        client,
+        title="  Platform Engineer ",
+        location="Berlin, Germany",
+        description="Python and Kubernetes.",
+        url="https://example.com/careers/1",
+    )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["status"] == "saved"
+    assert body["applied_at"] is None
+    assert body["job"]["source"] == MANUAL_SOURCE
+    assert body["job"]["title"] == "Platform Engineer"  # trimmed
+    assert body["job"]["company"] == "Side Project GmbH"
+
+    assert [a["job_id"] for a in client.get("/applications").json()] == [body["job_id"]]
+    with session_factory() as s:
+        job = s.get(Job, body["job_id"])
+        assert job.description == "Python and Kubernetes."
+        assert job.company_norm == "side project"  # ingest normalizer (legal suffix dropped)
+        assert job.title_norm == "platform engineer"
+
+
+def test_manual_application_status_stamps_applied_at(client):
+    body = _manual(client, status="applied").json()
+    assert body["status"] == "applied"
+    assert body["applied_at"] is not None
+
+
+def test_manual_application_url_optional(client):
+    body = _manual(client).json()
+    assert body["job"]["url"] == ""
+
+
+def test_manual_application_requires_title_and_company(client):
+    for overrides in ({"title": "  "}, {"company": ""}):
+        resp = _manual(client, **overrides)
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "Title and company are required."
+    assert client.get("/applications").json() == []
+
+
+def test_manual_job_excluded_from_corpus(client, session_factory):
+    with session_factory() as s:
+        s.add(Cv(label="cv", content="x", embedding=[1.0, 0.0, 0.0]))
+        s.commit()
+    corpus_id = _seed_job(session_factory, sid="corpus", embedding=[1.0, 0.0, 0.0])
+    manual_id = _manual(client, location="Lisbon, Portugal").json()["job_id"]
+    # Give the manual job every signal a corpus job has, so only the source excludes it.
+    with session_factory() as s:
+        job = s.get(Job, manual_id)
+        job.embedding = [1.0, 0.0, 0.0]
+        job.city, job.country, job.language = "Lisbon", "Portugal", "pt"
+        s.commit()
+
+    listed = client.get("/jobs", params={"ignore_prefs": "true"}).json()
+    assert [i["id"] for i in listed["items"]] == [corpus_id]
+    assert listed["total"] == 1
+    assert client.get("/jobs", params={"source": MANUAL_SOURCE}).json()["total"] == 0
+
+    shortlist = client.get("/match/shortlist", params={"ignore_prefs": "true"}).json()
+    assert [i["id"] for i in shortlist["items"]] == [corpus_id]
+
+    assert "Lisbon" not in [r["name"] for r in client.get("/jobs/cities").json()]
+    assert "Portugal" not in [r["name"] for r in client.get("/jobs/countries").json()]
+    assert "pt" not in [r["code"] for r in client.get("/jobs/languages").json()]
+
+
+def test_manual_job_hidden_from_other_owners(client):
+    manual_id = _manual(client, description="secret notes").json()["job_id"]
+    assert client.get(f"/jobs/{manual_id}").status_code == 200  # the owner can read it
+
+    with TestClient(fastapi_app) as user:
+        user.post(
+            "/auth/register",
+            json={"name": "Ann", "email": "a@b.com", "password": "secret1!"},
+        )
+        assert user.get(f"/jobs/{manual_id}").status_code == 404
+        resp = user.post("/applications", json={"job_id": manual_id, "status": "saved"})
+        assert resp.status_code == 404
+        assert user.get("/applications").json() == []
+
+
+def test_untrack_manual_deletes_job(client, session_factory):
+    manual_id = _manual(client).json()["job_id"]
+    assert client.delete(f"/applications/{manual_id}").status_code == 204
+    assert client.get("/applications").json() == []
+    with session_factory() as s:
+        assert s.get(Job, manual_id) is None  # not left orphaned

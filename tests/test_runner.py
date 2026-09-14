@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from app.ingest import runner
-from app.models import Application, Job
+from app.models import MANUAL_SOURCE, Application, Job
 from tests.conftest import BrokenSource, FakeSource, make_canonical
 
 
@@ -215,3 +215,20 @@ def test_unknown_source_raises(session):
     except KeyError:
         return
     raise AssertionError("expected KeyError for unknown source")
+
+
+def test_manual_job_does_not_dedup_away_real_posting(session, monkeypatch):
+    same = dict(title="Senior Backend Engineer", company="GitLab", location="Remote, Germany")
+    manual = Job(source=MANUAL_SOURCE, source_id="m1")
+    runner._apply_fields(manual, make_canonical(source=MANUAL_SOURCE, source_id="m1", **same))
+    session.add(manual)
+    session.commit()
+    monkeypatch.setitem(
+        runner.SOURCES, "srca", FakeSource("srca", [make_canonical(source_id="a1", **same)])
+    )
+
+    stats = runner.ingest_source(session, "srca", force=True, client=_DUMMY_CLIENT)
+
+    # A user's private manual job must not keep the real posting out of the corpus.
+    assert stats.inserted == 1 and stats.deduped == 0
+    assert _count(session) == 2

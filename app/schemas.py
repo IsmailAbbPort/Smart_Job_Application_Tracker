@@ -88,6 +88,13 @@ class CvUpload(BaseModel):
     content_base64: str
 
 
+class CvFileReplace(BaseModel):
+    """A new file for an existing CV (keeps its label), base64-encoded by the browser."""
+
+    filename: str
+    content_base64: str
+
+
 class CvUpdate(BaseModel):
     """Edit an existing CV's label (point 21)."""
 
@@ -279,6 +286,18 @@ class ApplicationUpsert(BaseModel):
     notes: str | None = None
 
 
+class ManualApplicationCreate(BaseModel):
+    """Track a job that is not in the ingested corpus (creates a private job row)."""
+
+    title: str
+    company: str
+    url: str = ""
+    location: str | None = None
+    description: str = ""
+    is_remote: bool = False
+    status: ApplicationStatus = ApplicationStatus.saved
+
+
 class ApplicationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -291,6 +310,29 @@ class ApplicationOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     job: JobOut
+
+
+# --- Saved views (filter presets) ---
+
+
+class SavedViewCreate(BaseModel):
+    name: str
+    filters: dict
+
+
+class SavedViewUpdate(BaseModel):
+    name: str | None = None
+    filters: dict | None = None
+
+
+class SavedViewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    filters: dict
+    created_at: datetime
+    updated_at: datetime
 
 
 class PreferencesOut(BaseModel):

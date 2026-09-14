@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models import Job
+from app.models import MANUAL_SOURCE, Job
 
 
 def recency_weight(
@@ -87,7 +87,7 @@ def rank_jobs(
     limit: int,
 ) -> list[tuple[Job, float]]:
     """Return the top `limit` (job, similarity) pairs, most similar first."""
-    conditions = [Job.embedding.is_not(None), *filters]
+    conditions = [Job.embedding.is_not(None), Job.source != MANUAL_SOURCE, *filters]
 
     if session.get_bind().dialect.name == "postgresql":
         distance = Job.embedding.cosine_distance(cv_vector).label("distance")

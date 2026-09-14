@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from app.ingest.liveness import check_alive, prune_dead_jobs
-from app.models import Application, Job
+from app.models import MANUAL_SOURCE, Application, Job
 
 
 def _client(handler) -> httpx.Client:
@@ -91,3 +91,14 @@ def test_prune_dry_run_deletes_nothing(session):
     stats = prune_dead_jobs(session, limit=10, apply=False, client=_client(_status_handler))
     assert stats["dead"] == 1 and stats["deleted"] == 0
     assert session.query(Job).count() == 1  # dry run left it in place
+
+
+def test_prune_never_touches_manual_jobs(session):
+    manual = _job("m", "http://x/404")
+    manual.source = MANUAL_SOURCE
+    session.add_all([manual, _job("dead", "http://x/404")])
+    session.commit()
+
+    stats = prune_dead_jobs(session, limit=10, apply=True, client=_client(_status_handler))
+    assert stats["checked"] == 1  # the manual job is not even scanned
+    assert {j.source_id for j in session.query(Job).all()} == {"m"}

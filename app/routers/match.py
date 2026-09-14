@@ -14,12 +14,12 @@ from app.ai.embedder import Embedder, build_job_document, get_embedder
 from app.ai.judge import Judge, build_job_text, get_judge
 from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
 from app.ai.role_family import RoleClassifier
-from app.applications import annotate_application_status
+from app.applications import annotate_application_status, job_visible_to
 from app.auth import get_current_user_optional
 from app.config import Settings, get_settings
 from app.db import get_session
 from app.ingest.eligibility import timezone_overlap_hours
-from app.models import Cv, Job, Match, SearchPreferences, User
+from app.models import MANUAL_SOURCE, Cv, Job, Match, SearchPreferences, User
 from app.prefs import get_preferences, preference_filters
 from app.ratelimit import charge
 from app.schemas import (
@@ -82,7 +82,8 @@ def embed_jobs(
     limit: int = Query(default=5000, ge=1, le=10000, description="Max jobs to embed this call"),
 ) -> dict:
     """Embed jobs that lack an embedding (or all, with force)."""
-    stmt = select(Job)
+    # Manual jobs never enter the cosine shortlist, so embedding them is wasted spend.
+    stmt = select(Job).where(Job.source != MANUAL_SOURCE)
     if not force:
         stmt = stmt.where(Job.embedding.is_(None))
     jobs = session.scalars(stmt.limit(limit)).all()
@@ -93,7 +94,11 @@ def embed_jobs(
             job.embedding = vector
         session.commit()
 
-    remaining = session.scalar(select(func.count()).select_from(Job).where(Job.embedding.is_(None)))
+    remaining = session.scalar(
+        select(func.count())
+        .select_from(Job)
+        .where(Job.embedding.is_(None), Job.source != MANUAL_SOURCE)
+    )
     return {"embedded": len(jobs), "remaining_unembedded": remaining or 0}
 
 
@@ -110,7 +115,7 @@ def classify_roles(
     Title-only, so it is boilerplate-free and independent of the retrieve embedding.
     Idempotent: classifies rows without a family unless force re-does all.
     """
-    stmt = select(Job)
+    stmt = select(Job).where(Job.source != MANUAL_SOURCE)
     if not force:
         stmt = stmt.where(Job.role_family.is_(None))
     jobs = session.scalars(stmt.limit(limit)).all()
@@ -130,7 +135,9 @@ def classify_roles(
         session.commit()
 
     remaining = session.scalar(
-        select(func.count()).select_from(Job).where(Job.role_family.is_(None))
+        select(func.count())
+        .select_from(Job)
+        .where(Job.role_family.is_(None), Job.source != MANUAL_SOURCE)
     )
     return {
         "classified": len(jobs),
@@ -322,7 +329,7 @@ def rerank(
     verdicts: list[MatchOut] = []
     for job_id in payload.job_ids[:_MAX_RERANK]:
         job = session.get(Job, job_id)
-        if job is None:
+        if job is None or not job_visible_to(session, job, owner_id):
             continue
         verdicts.append(
             _to_match_out(
@@ -359,7 +366,7 @@ def judge_job(
     owner_id = user.id if user else None
     cv = _resolve_cv(session, cv_id, owner_id)
     job = session.get(Job, job_id)
-    if job is None:
+    if job is None or not job_visible_to(session, job, owner_id):
         raise HTTPException(status_code=404, detail="job not found")
     return _to_match_out(
         _judge_and_store(

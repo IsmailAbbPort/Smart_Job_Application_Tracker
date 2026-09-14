@@ -44,7 +44,7 @@ from app.ingest.sources.ashby import AshbySource
 from app.ingest.sources.greenhouse import GreenhouseSource
 from app.ingest.sources.lever import LeverSource
 from app.ingest.sources.remotive import RemotiveSource
-from app.models import Application, Job
+from app.models import MANUAL_SOURCE, Application, Job
 
 # The source registry. Adding a source = adding one line here.
 SOURCES: dict[str, Source] = {
@@ -153,10 +153,13 @@ def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: Ing
             stats.updated += 1
             continue
 
-        # Cross-source dedup: same real role already stored from another source.
+        # Cross-source dedup: same real role already stored from another source. A
+        # user's private manual job must not keep the real posting out of the corpus.
         key = dedup_key(cj.company, cj.title, cj.location)
         clash = session.scalar(
-            select(Job).where(Job.dedup_key == key, Job.source != source).limit(1)
+            select(Job)
+            .where(Job.dedup_key == key, Job.source != source, Job.source != MANUAL_SOURCE)
+            .limit(1)
         )
         if clash is not None:
             stats.deduped += 1

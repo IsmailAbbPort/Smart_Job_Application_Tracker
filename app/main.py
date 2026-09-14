@@ -26,6 +26,7 @@ from app.routers import (
     match,
     preferences,
     targets,
+    views,
 )
 from app.scheduler import start_scheduler, stop_scheduler
 
@@ -56,6 +57,7 @@ app.include_router(match.router)
 app.include_router(preferences.router)
 app.include_router(applications.router)
 app.include_router(letters.router)
+app.include_router(views.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

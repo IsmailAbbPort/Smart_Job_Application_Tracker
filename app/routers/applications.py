@@ -2,21 +2,32 @@
 
 Keyed by job_id for a single user: POST upserts (create or advance the status),
 GET lists / reports pipeline stats, DELETE untracks. `applied_at` is stamped the
-first time an application leaves the 'saved' stage.
+first time an application leaves the 'saved' stage. POST /manual tracks a job that
+is not in the corpus (a private manual job, deleted again when untracked).
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.applications import job_visible_to
 from app.auth import get_current_user_optional
 from app.db import get_session
-from app.models import Application, Cv, Job, User
-from app.schemas import ApplicationOut, ApplicationStatus, ApplicationUpsert, JobOut
+from app.ingest.base import CanonicalJob
+from app.ingest.runner import _apply_fields
+from app.models import MANUAL_SOURCE, Application, Cv, Job, User
+from app.schemas import (
+    ApplicationOut,
+    ApplicationStatus,
+    ApplicationUpsert,
+    JobOut,
+    ManualApplicationCreate,
+)
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -48,7 +59,7 @@ def upsert_application(
     """Start tracking a job or advance its status. Idempotent on (owner, job_id)."""
     owner_id = _owner_id(user)
     job = session.get(Job, payload.job_id)
-    if job is None:
+    if job is None or not job_visible_to(session, job, owner_id):
         raise HTTPException(status_code=404, detail="job not found")
     if payload.cv_id is not None:
         cv = session.get(Cv, payload.cv_id)
@@ -73,6 +84,45 @@ def upsert_application(
     if app.status != ApplicationStatus.saved.value and app.applied_at is None:
         app.applied_at = datetime.now(UTC)
 
+    session.commit()
+    session.refresh(app)
+    return _to_out(app, job)
+
+
+@router.post("/manual", response_model=ApplicationOut, status_code=201)
+def create_manual_application(
+    payload: ManualApplicationCreate,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> ApplicationOut:
+    """Track a job that is not in the corpus: store it as a private manual job."""
+    title = payload.title.strip()
+    company = payload.company.strip()
+    if not title or not company:
+        raise HTTPException(status_code=422, detail="Title and company are required.")
+
+    job = Job(source=MANUAL_SOURCE, source_id=uuid4().hex)
+    # Same normalization + derived signals as ingest, so the job renders like any other.
+    _apply_fields(
+        job,
+        CanonicalJob(
+            source=MANUAL_SOURCE,
+            source_id=job.source_id,
+            title=title,
+            company=company,
+            url=payload.url.strip(),
+            description=payload.description,
+            location=payload.location,
+            is_remote=payload.is_remote,
+        ),
+    )
+    session.add(job)
+    session.flush()
+
+    app = Application(job_id=job.id, owner_id=_owner_id(user), status=payload.status.value)
+    if app.status != ApplicationStatus.saved.value:
+        app.applied_at = datetime.now(UTC)
+    session.add(app)
     session.commit()
     session.refresh(app)
     return _to_out(app, job)
@@ -141,4 +191,9 @@ def untrack_application(
     )
     if app is not None:
         session.delete(app)
+        job = session.get(Job, job_id)
+        # A manual job exists only for this pipeline entry, so it goes with it.
+        if job is not None and job.source == MANUAL_SOURCE:
+            session.flush()
+            session.delete(job)
         session.commit()

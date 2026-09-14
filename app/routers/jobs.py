@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.applications import annotate_application_status
+from app.applications import annotate_application_status, job_visible_to
+from app.auth import get_current_user_optional
 from app.db import get_session
-from app.models import Job, SearchPreferences
+from app.models import MANUAL_SOURCE, Job, SearchPreferences, User
 from app.prefs import get_preferences, preference_filters
 from app.schemas import JobDetail, JobList, JobOut
 
@@ -60,6 +61,7 @@ def list_jobs(
         require_salary=require_salary,
         max_experience_gap=max_experience_gap,
     )
+    filters.append(Job.source != MANUAL_SOURCE)
     if source is not None:
         filters.append(Job.source == source)
     if city is not None:
@@ -88,7 +90,7 @@ def list_languages(session: Session = Depends(get_session)) -> list[dict]:
     """Posting languages present in the corpus, with counts (for the UI filter)."""
     rows = session.execute(
         select(Job.language, func.count())
-        .where(Job.language.is_not(None))
+        .where(Job.language.is_not(None), Job.source != MANUAL_SOURCE)
         .group_by(Job.language)
         .order_by(func.count().desc())
     ).all()
@@ -100,7 +102,7 @@ def list_cities(session: Session = Depends(get_session)) -> list[dict]:
     """Resolved cities present in the corpus, with counts (for the UI filter)."""
     rows = session.execute(
         select(Job.city, func.count())
-        .where(Job.city.is_not(None), Job.city != "")
+        .where(Job.city.is_not(None), Job.city != "", Job.source != MANUAL_SOURCE)
         .group_by(Job.city)
         .order_by(func.count().desc())
     ).all()
@@ -112,7 +114,7 @@ def list_countries(session: Session = Depends(get_session)) -> list[dict]:
     """Resolved countries present in the corpus, with counts (for the UI filter)."""
     rows = session.execute(
         select(Job.country, func.count())
-        .where(Job.country.is_not(None), Job.country != "")
+        .where(Job.country.is_not(None), Job.country != "", Job.source != MANUAL_SOURCE)
         .group_by(Job.country)
         .order_by(func.count().desc())
     ).all()
@@ -120,8 +122,12 @@ def list_countries(session: Session = Depends(get_session)) -> list[dict]:
 
 
 @router.get("/{job_id}", response_model=JobDetail)
-def get_job(job_id: int, session: Session = Depends(get_session)) -> JobDetail:
+def get_job(
+    job_id: int,
+    session: Session = Depends(get_session),
+    user: User | None = Depends(get_current_user_optional),
+) -> JobDetail:
     job = session.get(Job, job_id)
-    if job is None:
+    if job is None or not job_visible_to(session, job, user.id if user else None):
         raise HTTPException(status_code=404, detail="job not found")
     return JobDetail.model_validate(job)

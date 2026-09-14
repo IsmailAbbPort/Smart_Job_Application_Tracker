@@ -6,15 +6,15 @@ import base64
 import binascii
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.ai.embedder import Embedder, build_cv_document, get_embedder
 from app.auth import get_current_user_optional
 from app.cv_extract import extract_cv_text, looks_like_pdf
 from app.db import get_session
-from app.models import Cv, User
-from app.schemas import CvCreate, CvDetail, CvOut, CvUpdate, CvUpload
+from app.models import CoverLetter, Cv, Match, User
+from app.schemas import CvCreate, CvDetail, CvFileReplace, CvOut, CvUpdate, CvUpload
 
 router = APIRouter(prefix="/cv", tags=["cv"])
 
@@ -67,6 +67,28 @@ def _embed_and_store(
     return _to_out(cv)
 
 
+def _decode_cv_file(filename: str, content_base64: str) -> tuple[bytes, str, str]:
+    """Decode + validate an uploaded CV file into (raw bytes, extracted text, content type)."""
+    try:
+        raw = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="content_base64 is not valid base64") from exc
+
+    if len(raw) > MAX_CV_BYTES:
+        raise HTTPException(status_code=413, detail="CV file is too large (max 5 MB).")
+
+    is_pdf = looks_like_pdf(filename, raw)
+    if not is_pdf and not filename.lower().endswith(".txt"):
+        raise HTTPException(status_code=422, detail="Only PDF or .txt files are accepted.")
+
+    content = extract_cv_text(filename, raw)
+    if not content:
+        raise HTTPException(
+            status_code=422, detail="could not extract any text from the uploaded file"
+        )
+    return raw, content, "application/pdf" if is_pdf else "text/plain"
+
+
 @router.post("", response_model=CvOut, status_code=201)
 def create_cv(
     payload: CvCreate,
@@ -85,23 +107,7 @@ def upload_cv(
     user: User | None = Depends(get_current_user_optional),
 ) -> CvOut:
     """Accept a base64-encoded CV file (PDF or text), extract its text, embed, store."""
-    try:
-        raw = base64.b64decode(payload.content_base64, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="content_base64 is not valid base64") from exc
-
-    if len(raw) > MAX_CV_BYTES:
-        raise HTTPException(status_code=413, detail="CV file is too large (max 5 MB).")
-
-    is_pdf = looks_like_pdf(payload.filename, raw)
-    if not is_pdf and not payload.filename.lower().endswith(".txt"):
-        raise HTTPException(status_code=422, detail="Only PDF or .txt files are accepted.")
-
-    content = extract_cv_text(payload.filename, raw)
-    if not content:
-        raise HTTPException(
-            status_code=422, detail="could not extract any text from the uploaded file"
-        )
+    raw, content, content_type = _decode_cv_file(payload.filename, payload.content_base64)
     return _embed_and_store(
         payload.label,
         content,
@@ -110,7 +116,7 @@ def upload_cv(
         _owner_id(user),
         file_data=raw,
         filename=payload.filename,
-        content_type="application/pdf" if is_pdf else "text/plain",
+        content_type=content_type,
     )
 
 
@@ -163,6 +169,31 @@ def update_cv(
     if not label:
         raise HTTPException(status_code=422, detail="Label cannot be empty.")
     cv.label = label
+    session.commit()
+    session.refresh(cv)
+    return _to_out(cv)
+
+
+@router.put("/{cv_id}/file", response_model=CvOut)
+def replace_cv_file(
+    cv_id: int,
+    payload: CvFileReplace,
+    session: Session = Depends(get_session),
+    embedder: Embedder = Depends(get_embedder),
+    user: User | None = Depends(get_current_user_optional),
+) -> CvOut:
+    """Swap a CV's file (keeping its label): re-extract, re-embed, and drop the
+    verdicts and letters grounded in the old text, since they are now stale."""
+    cv = _get_owned(cv_id, session, user)
+    raw, content, content_type = _decode_cv_file(payload.filename, payload.content_base64)
+    cv.content = content
+    cv.embedding = embedder.embed([build_cv_document(content)])[0]
+    cv.file_data = raw
+    cv.filename = payload.filename
+    cv.content_type = content_type
+    cv.size_bytes = len(raw)
+    session.execute(delete(Match).where(Match.cv_id == cv.id))
+    session.execute(delete(CoverLetter).where(CoverLetter.cv_id == cv.id))
     session.commit()
     session.refresh(cv)
     return _to_out(cv)
