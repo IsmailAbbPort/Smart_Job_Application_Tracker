@@ -5,7 +5,10 @@ import { Shortlist } from "./features/shortlist/Shortlist";
 import { Board } from "./features/board/Board";
 import { AuthModal } from "./features/auth/AuthModal";
 import { CvModal } from "./features/shortlist/CvModal";
-import { Sidebar, type View } from "./features/sidebar/Sidebar";
+import { Sidebar } from "./features/sidebar/Sidebar";
+import { TabBar, type Tab } from "./features/sidebar/TabBar";
+import { YouPage } from "./features/sidebar/YouPage";
+import { useIsMobile } from "./hooks";
 import { Modal } from "./components/Modal";
 import { Tour, type TourStep } from "./components/Tour";
 import {
@@ -66,10 +69,51 @@ const TOUR_STEPS: TourStep[] = [
   },
 ];
 
+// The phone layout has no sidebar or side inspector, so its tour points at the
+// header controls and the tab bar instead.
+const MOBILE_TOUR_STEPS: TourStep[] = [
+  {
+    target: "cv",
+    title: "Your CV drives the ranking",
+    body: "Every role is scored by how closely it matches this CV. Tap to switch CVs.",
+  },
+  {
+    target: "filters",
+    title: "Narrow the list",
+    body: "Filter by remote, experience, location, language, salary and role type.",
+  },
+  {
+    target: "views",
+    title: "Saved filter sets",
+    body: "Views you save from Filters sit here, one tap to apply.",
+  },
+  {
+    target: "table",
+    title: "Roles ranked for you",
+    body: "Fit is how similar a role is to your CV, relative to the best match. Tap a role for details, an AI fit score and a cover letter.",
+  },
+  {
+    target: "rank",
+    title: "Rank the top 10 with AI",
+    body: "Scores the first ten roles in one go and reorders them by the AI score.",
+  },
+  {
+    target: "applications",
+    title: "Track your applications",
+    body: "Everything you track lands here, one stage at a time. Hold a card and drag it onto a stage to move it.",
+  },
+  {
+    target: "you",
+    title: "CVs, views and settings",
+    body: "Upload, edit or replace CVs, manage saved views, switch theme or replay this tour.",
+  },
+];
+
 const sameFilters = (a: FilterState, b: FilterState) => JSON.stringify(a) === JSON.stringify(b);
 
 export default function App() {
-  const [view, setView] = useState<View>(
+  const mobile = useIsMobile();
+  const [view, setView] = useState<Tab>(
     new URLSearchParams(location.search).get("view") === "board" ? "board" : "shortlist",
   );
   const [user, setUser] = useState<User | null>(null);
@@ -100,6 +144,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  // The You tab only exists on phones; widening the window falls back to the shortlist.
+  useEffect(() => {
+    if (!mobile && view === "you") setView("shortlist");
+  }, [mobile, view]);
 
   // The open tab is shareable; nothing else (no record ids) goes in the URL.
   useEffect(() => {
@@ -208,6 +257,11 @@ export default function App() {
     setRunToken((t) => t + 1);
   };
 
+  const applyView = (v: SavedView) =>
+    applyFilters({ ...defaultFilters, ...(v.filters as Partial<FilterState>) });
+
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+
   const saveView = async (name: string, f: FilterState) => {
     const created = await api.createView({
       name,
@@ -243,33 +297,54 @@ export default function App() {
   );
 
   return (
-    <div className={"app" + (view === "board" ? " no-inspector" : "")}>
-      <Sidebar
-        view={view}
-        onView={setView}
-        stats={stats}
-        shortlistCount={shortlistCount}
-        views={views}
-        activeViewId={activeView?.id ?? null}
-        onApplyView={(v) =>
-          applyFilters({ ...defaultFilters, ...(v.filters as Partial<FilterState>) })
-        }
-        onDeleteView={setViewToDelete}
-        cvs={cvs}
-        cvId={cvId}
-        onSelectCv={setCvId}
-        onEditCv={() => setEditOpen(true)}
-        onDeleteCv={() => setConfirmDelete(true)}
-        onUploadCv={() => setUploadOpen(true)}
-        user={user}
-        onSignIn={() => setAuthOpen(true)}
-        onLogout={() => setConfirmLogout(true)}
-        theme={theme}
-        onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-        onTour={startTour}
-      />
+    <div className={"app" + (mobile ? " mobile" : view === "board" ? " no-inspector" : "")}>
+      {!mobile && (
+        <Sidebar
+          view={view === "board" ? "board" : "shortlist"}
+          onView={setView}
+          stats={stats}
+          shortlistCount={shortlistCount}
+          views={views}
+          activeViewId={activeView?.id ?? null}
+          onApplyView={applyView}
+          onDeleteView={setViewToDelete}
+          cvs={cvs}
+          cvId={cvId}
+          onSelectCv={setCvId}
+          onEditCv={() => setEditOpen(true)}
+          onDeleteCv={() => setConfirmDelete(true)}
+          onUploadCv={() => setUploadOpen(true)}
+          user={user}
+          onSignIn={() => setAuthOpen(true)}
+          onLogout={() => setConfirmLogout(true)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onTour={startTour}
+        />
+      )}
 
-      {view === "shortlist" ? (
+      {view === "board" ? (
+        <Board cvId={cvId} />
+      ) : view === "you" && mobile ? (
+        <YouPage
+          cvs={cvs}
+          cvId={cvId}
+          onSelectCv={setCvId}
+          onEditCv={() => setEditOpen(true)}
+          onDeleteCv={() => setConfirmDelete(true)}
+          onUploadCv={() => setUploadOpen(true)}
+          views={views}
+          activeViewId={activeView?.id ?? null}
+          onApplyView={applyView}
+          onDeleteView={setViewToDelete}
+          user={user}
+          onSignIn={() => setAuthOpen(true)}
+          onLogout={() => setConfirmLogout(true)}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onTour={startTour}
+        />
+      ) : (
         <Shortlist
           cvId={cvId}
           ready={cvsLoaded}
@@ -278,12 +353,26 @@ export default function App() {
           runToken={runToken}
           onCount={setShortlistCount}
           onSaveView={saveView}
+          cvs={cvs}
+          onSelectCv={setCvId}
+          onUploadCv={() => setUploadOpen(true)}
+          views={views}
+          activeViewId={activeView?.id ?? null}
+          onApplyView={applyView}
         />
-      ) : (
-        <Board cvId={cvId} />
       )}
 
-      <Tour open={tourOpen} steps={TOUR_STEPS} onClose={closeTour} />
+      {mobile && <TabBar view={view} onView={setView} appCount={stats.total} />}
+
+      <Tour
+        open={tourOpen}
+        steps={
+          mobile
+            ? MOBILE_TOUR_STEPS.filter((s) => s.target !== "views" || views.length > 0)
+            : TOUR_STEPS
+        }
+        onClose={closeTour}
+      />
 
       <AuthModal
         open={authOpen}

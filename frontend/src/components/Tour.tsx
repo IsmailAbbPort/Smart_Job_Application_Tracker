@@ -53,21 +53,25 @@ function measure(target: string): Rect | null {
   };
 }
 
+const cardWidth = () => Math.min(CARD_W, window.innerWidth - 32);
+
 // Place the card beside the highlighted element: right if it fits, else left,
-// else below; always clamped inside the viewport.
+// else below (above when below runs off screen); always clamped inside the viewport.
 function cardPosition(r: Rect | null, cardH: number): { top: number; left: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  if (!r) return { top: vh / 2 - cardH / 2, left: vw / 2 - CARD_W / 2 };
+  const w = cardWidth();
+  if (!r) return { top: vh / 2 - cardH / 2, left: vw / 2 - w / 2 };
   let left: number;
   let top = r.top;
-  if (r.left + r.width + GAP + CARD_W <= vw - 16) left = r.left + r.width + GAP;
-  else if (r.left - GAP - CARD_W >= 16) left = r.left - GAP - CARD_W;
+  if (r.left + r.width + GAP + w <= vw - 16) left = r.left + r.width + GAP;
+  else if (r.left - GAP - w >= 16) left = r.left - GAP - w;
   else {
     left = r.left;
     top = r.top + r.height + GAP;
+    if (top + cardH > vh - 16 && r.top - GAP - cardH >= 16) top = r.top - GAP - cardH;
   }
-  left = Math.min(Math.max(16, left), vw - CARD_W - 16);
+  left = Math.min(Math.max(16, left), vw - w - 16);
   top = Math.min(Math.max(16, top), vh - cardH - 16);
   return { top, left };
 }
@@ -148,7 +152,7 @@ export function Tour({
       <div
         className="tour-card"
         ref={setCard}
-        style={{ top: pos.top, left: pos.left, width: CARD_W }}
+        style={{ top: pos.top, left: pos.left, width: cardWidth() }}
       >
         <div className="tour-step num">
           {index + 1} of {steps.length}

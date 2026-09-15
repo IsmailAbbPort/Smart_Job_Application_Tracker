@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ListFilter, Loader2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronsUpDown,
+  Download,
+  ListFilter,
+  Loader2,
+  Search,
+  Sparkles,
+  Upload,
+} from "lucide-react";
 import { api } from "../../api";
 import { Dropdown } from "../../components/Dropdown";
 import type { Option } from "../../components/Select";
 import { REGIONS, ROLE_FAMILIES, languageName, tzLabel } from "../../constants";
-import { fmtAgo, isStale } from "../../format";
-import type { Job, ShortlistResponse, Verdict } from "../../types";
+import { effortText, fmtAgo, fmtAgoLong, isStale } from "../../format";
+import { useBackToClose, useIsMobile } from "../../hooks";
+import type { Cv, Job, SavedView, ShortlistResponse, Verdict } from "../../types";
 import { JobInspector, StatusDot } from "../inspector/JobInspector";
 import { FiltersModal, buildLanguageOptions, buildNameOptions } from "./FiltersModal";
 import { exportCsv, exportPdf, exportTxt } from "./exports";
@@ -52,6 +63,12 @@ export function Shortlist({
   runToken,
   onCount,
   onSaveView,
+  cvs,
+  onSelectCv,
+  onUploadCv,
+  views,
+  activeViewId,
+  onApplyView,
 }: {
   cvId: string;
   ready: boolean;
@@ -60,7 +77,15 @@ export function Shortlist({
   runToken: number;
   onCount: (n: number | null) => void;
   onSaveView: (name: string, f: FilterState) => Promise<void>;
+  // The phone layout has no sidebar, so the CV switcher and saved views live here.
+  cvs: Cv[];
+  onSelectCv: (id: string) => void;
+  onUploadCv: () => void;
+  views: SavedView[];
+  activeViewId: number | null;
+  onApplyView: (v: SavedView) => void;
 }) {
+  const mobile = useIsMobile();
   const [langOptions, setLangOptions] = useState<Option[]>([]);
   const [cityOptions, setCityOptions] = useState<Option[]>([]);
   const [countryOptions, setCountryOptions] = useState<Option[]>([]);
@@ -71,6 +96,8 @@ export function Shortlist({
   const [reranking, setReranking] = useState(false);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
   const say = (text: string, error = false) => setMessage({ text, error });
 
@@ -203,6 +230,263 @@ export function Shortlist({
       document.querySelector(`tr[data-row="${selectedId}"]`)?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
+  useBackToClose(mobile && openId != null, () => setOpenId(null));
+
+  const exportMenu = (close: () => void) => (
+    <>
+      <button
+        onClick={() => {
+          if (results) exportCsv(items, results.cv_id);
+          close();
+        }}
+      >
+        CSV spreadsheet
+      </button>
+      <button
+        onClick={() => {
+          if (results) exportTxt(items, results.cv_id);
+          close();
+        }}
+      >
+        Plain text
+      </button>
+      <button
+        disabled={items.length > 50}
+        title={items.length > 50 ? "Available for 50 results or fewer" : undefined}
+        onClick={() => {
+          if (results) exportPdf(items, results.cv_id, (m) => say(m, true));
+          close();
+        }}
+      >
+        PDF
+      </button>
+    </>
+  );
+
+  const filtersModal = (
+    <FiltersModal
+      open={filtersOpen}
+      onOpenChange={setFiltersOpen}
+      filters={filters}
+      onApply={(f) => {
+        setFiltersOpen(false);
+        onFiltersChange(f);
+      }}
+      onSaveView={onSaveView}
+      languageOptions={langOptions}
+      cityOptions={cityOptions}
+      countryOptions={countryOptions}
+    />
+  );
+
+  if (mobile) {
+    const cv = cvs.find((c) => String(c.id) === cvId) ?? null;
+    const q = query.trim().toLowerCase();
+    const rows = items
+      .map((job, i) => ({ job, rank: i + 1 }))
+      .filter(
+        ({ job }) =>
+          !q || job.title.toLowerCase().includes(q) || job.company.toLowerCase().includes(q),
+      );
+    const opened = items.find((j) => j.id === openId) ?? null;
+
+    return (
+      <>
+        <main>
+          <header className="m-head">
+            <div className="m-title">
+              <h1>Shortlist</h1>
+              <span className="spacer" />
+              <Dropdown
+                trigger={({ toggle }) => (
+                  <button
+                    className="iconbtn m-icon"
+                    onClick={toggle}
+                    disabled={!items.length}
+                    aria-label="Export"
+                  >
+                    <Download size={18} />
+                  </button>
+                )}
+              >
+                {exportMenu}
+              </Dropdown>
+              <button
+                className="iconbtn m-icon"
+                data-tour="rank"
+                onClick={rerank}
+                disabled={reranking || !items.length}
+                aria-label="Rank top 10 with AI"
+              >
+                {reranking ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
+              </button>
+            </div>
+            <Dropdown
+              className="m-cvmenu"
+              trigger={({ toggle }) => (
+                <button className="cvpill" onClick={toggle} data-tour="cv">
+                  <span className="file">
+                    {cv?.content_type === "application/pdf" ? "PDF" : cv?.filename ? "TXT" : "CV"}
+                  </span>
+                  {cv ? (
+                    <>
+                      Matching <b>{cv.label}</b>
+                    </>
+                  ) : (
+                    "No CV yet"
+                  )}
+                  <ChevronsUpDown size={14} className="faint" />
+                </button>
+              )}
+            >
+              {(close) => (
+                <>
+                  {cvs.map((c) => (
+                    <button
+                      key={c.id}
+                      className={String(c.id) === cvId ? "on" : ""}
+                      onClick={() => {
+                        onSelectCv(String(c.id));
+                        close();
+                      }}
+                    >
+                      <span className="menu-label">{c.label}</span>
+                      {String(c.id) === cvId && <Check size={14} className="check-mark" />}
+                    </button>
+                  ))}
+                  {cvs.length > 0 && <div className="sep" />}
+                  <button
+                    onClick={() => {
+                      close();
+                      onUploadCv();
+                    }}
+                  >
+                    <Upload size={14} /> Upload {cvs.length ? "another" : "a"} CV
+                  </button>
+                </>
+              )}
+            </Dropdown>
+          </header>
+
+          <div className="m-search">
+            <label className="search">
+              <Search size={16} />
+              <input
+                type="search"
+                placeholder="Search roles or companies"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            <button
+              className="iconbtn m-icon"
+              onClick={() => setFiltersOpen(true)}
+              data-tour="filters"
+              aria-label="Filters"
+            >
+              <ListFilter size={18} />
+              {activeCount > 0 && <span className="badge num">{activeCount}</span>}
+            </button>
+          </div>
+
+          {views.length > 0 && (
+            <div className="m-chips" data-tour="views">
+              {views.map((v) => (
+                <button
+                  key={v.id}
+                  className={"m-chip" + (activeViewId === v.id ? " on" : "")}
+                  onClick={() => onApplyView(v)}
+                >
+                  {v.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="m-meta num">
+            <span>
+              {loading
+                ? "Ranking..."
+                : results
+                  ? `${q ? `${rows.length} of ` : ""}${results.count} roles · fit × freshness`
+                  : ""}
+            </span>
+            {activeCount > 0 && (
+              <span>
+                {activeCount} filter{activeCount === 1 ? "" : "s"} on
+              </span>
+            )}
+          </div>
+
+          {message && (
+            <div className={"banner" + (message.error ? " error" : "")}>{message.text}</div>
+          )}
+
+          <div className="m-scroll scroll-themed" data-tour="table">
+            {results && rows.length === 0 && !loading ? (
+              <div className="empty">
+                {q ? "No roles match this search." : "No roles match these filters."}{" "}
+                {!q && (
+                  <button className="linkbtn" onClick={() => setFiltersOpen(true)}>
+                    Adjust filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              rows.map(({ job: j, rank }) => {
+                const fit = Math.max(3, Math.round((j.similarity / maxSim) * 100));
+                const v = judged[j.id];
+                const effort = effortText(j);
+                return (
+                  <button key={j.id} className="m-job" onClick={() => setOpenId(j.id)}>
+                    <span className="m-job-main">
+                      <span className="t">{j.title}</span>
+                      <span className="s">
+                        {j.company} · {j.city || j.country || j.location || "Not specified"}
+                        {j.is_remote ? " · Remote" : ""}
+                      </span>
+                      <span className="m">
+                        {j.posted_at && (
+                          <span className={"num" + (isStale(j.posted_at) ? " stale" : "")}>
+                            {fmtAgoLong(j.posted_at)}
+                          </span>
+                        )}
+                        {j.application_status && <StatusDot status={j.application_status} />}
+                        {v && <span className={"num tier-" + v.verdict}>AI {v.overall_score}</span>}
+                        {effort && <span className="tag">{effort}</span>}
+                      </span>
+                    </span>
+                    <span className="m-job-fit num">
+                      <b>{fit}</b>
+                      <span className="fitbar">
+                        <i style={{ width: `${fit}%` }} />
+                      </span>
+                      <small>#{rank}</small>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </main>
+
+        {opened && (
+          <JobInspector
+            page="Shortlist"
+            job={opened}
+            cvId={cvId}
+            verdict={judged[opened.id]}
+            onVerdict={(v) => setJudged((prev) => ({ ...prev, [v.job_id]: v }))}
+            onStatus={onStatus}
+            onClose={() => setOpenId(null)}
+          />
+        )}
+
+        {filtersModal}
+      </>
+    );
+  }
+
   return (
     <>
       <main>
@@ -216,36 +500,7 @@ export function Shortlist({
               </button>
             )}
           >
-            {(close) => (
-              <>
-                <button
-                  onClick={() => {
-                    if (results) exportCsv(items, results.cv_id);
-                    close();
-                  }}
-                >
-                  CSV spreadsheet
-                </button>
-                <button
-                  onClick={() => {
-                    if (results) exportTxt(items, results.cv_id);
-                    close();
-                  }}
-                >
-                  Plain text
-                </button>
-                <button
-                  disabled={items.length > 50}
-                  title={items.length > 50 ? "Available for 50 results or fewer" : undefined}
-                  onClick={() => {
-                    if (results) exportPdf(items, results.cv_id, (m) => say(m, true));
-                    close();
-                  }}
-                >
-                  PDF
-                </button>
-              </>
-            )}
+            {exportMenu}
           </Dropdown>
           <button
             className="btn primary"
@@ -384,19 +639,7 @@ export function Shortlist({
         </aside>
       )}
 
-      <FiltersModal
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
-        filters={filters}
-        onApply={(f) => {
-          setFiltersOpen(false);
-          onFiltersChange(f);
-        }}
-        onSaveView={onSaveView}
-        languageOptions={langOptions}
-        cityOptions={cityOptions}
-        countryOptions={countryOptions}
-      />
+      {filtersModal}
     </>
   );
 }

@@ -344,7 +344,7 @@ export function FiltersModal({
             </button>
           </div>
         )}
-        <button className="btn" onClick={() => onOpenChange(false)}>
+        <button className="btn hide-mobile" onClick={() => onOpenChange(false)}>
           Cancel
         </button>
         <button className="btn primary" onClick={() => onApply(f)}>

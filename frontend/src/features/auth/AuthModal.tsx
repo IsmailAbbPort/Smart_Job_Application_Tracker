@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import { SegmentedToggle } from "../../components/SegmentedToggle";
 import { api } from "../../api";
@@ -36,14 +36,18 @@ export function AuthModal({
     form?: string;
   }>({});
   const [busy, setBusy] = useState(false);
+  // After a sign-up attempt, unmet password rules show red instead of neutral.
+  const [triedSignup, setTriedSignup] = useState(false);
 
   const switchMode = (m: Mode) => {
     setMode(m);
     setErrs({});
+    setTriedSignup(false);
   };
 
   const validate = (): boolean => {
     const next: typeof errs = {};
+    if (mode === "signup") setTriedSignup(true);
     if (mode === "signup" && !name.trim()) next.name = "Please enter your name";
     if (!emailValid(email)) next.email = "Enter a valid email address";
     if (mode === "signup") {
@@ -144,9 +148,15 @@ export function AuthModal({
             <ul className="pw-rules">
               {rules.map((r) => {
                 const met = r.test(password);
+                const failed = !met && triedSignup;
                 return (
-                  <li key={r.label} className={met ? "met" : ""}>
-                    <Check size={13} strokeWidth={met ? 3 : 2} /> {r.label}
+                  <li key={r.label} className={met ? "met" : failed ? "unmet" : ""}>
+                    {failed ? (
+                      <X size={13} strokeWidth={3} />
+                    ) : (
+                      <Check size={13} strokeWidth={met ? 3 : 2} />
+                    )}{" "}
+                    {r.label}
                   </li>
                 );
               })}

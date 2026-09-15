@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Loader2, X } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, Loader2, X } from "lucide-react";
 import { api } from "../../api";
 import { STAGES, stageOf } from "../../constants";
 import { effortText, fmtAgoLong, fmtSalary, isStale } from "../../format";
@@ -79,6 +79,7 @@ export function JobInspector({
   onStatus,
   onClose,
   drawer,
+  page,
 }: {
   job: Job;
   cvId: string;
@@ -87,6 +88,8 @@ export function JobInspector({
   onStatus: (jobId: number, status: string) => void;
   onClose?: () => void;
   drawer?: boolean;
+  // Phone: a full-screen page with a back bar, labelled with where back goes.
+  page?: string;
 }) {
   const [verdict, setVerdict] = useState<Verdict | null>(givenVerdict ?? null);
   const [letter, setLetter] = useState<Letter | null>(null);
@@ -190,30 +193,53 @@ export function JobInspector({
   const effort = effortText(job);
   const noCv = !cvId;
 
+  const posting = job.url && (
+    <a
+      className="linkbtn posting"
+      href={job.url}
+      target="_blank"
+      rel="noopener"
+      title="Open the original posting"
+    >
+      Posting <ArrowUpRight size={page ? 16 : 14} />
+    </a>
+  );
+  const statusSelect = (
+    <Select
+      options={STATUS_OPTS}
+      value={STATUS_OPTS.find((o) => o.value === (job.application_status ?? "")) ?? STATUS_OPTS[0]}
+      isSearchable={false}
+      aria-label="Status"
+      maxMenuHeight={page ? 400 : undefined}
+      onChange={(o) => onStatus(job.id, (o as Option)?.value ?? "")}
+      formatOptionLabel={(o) => (o.value ? <StatusDot status={o.value} /> : o.label)}
+    />
+  );
+
   return (
     <aside
-      className={"inspector" + (drawer ? " drawer" : "")}
+      className={"inspector" + (drawer ? " drawer" : "") + (page ? " page" : "")}
       aria-label="Job details"
-      data-tour={drawer ? undefined : "inspector"}
+      data-tour={drawer || page ? undefined : "inspector"}
     >
+      {page && (
+        <div className="m-nav">
+          <button className="m-back" onClick={onClose}>
+            <ChevronLeft size={24} strokeWidth={1.75} />
+            {page}
+          </button>
+          <span className="spacer" />
+          {posting}
+        </div>
+      )}
       <div className="insp-head">
         <div className="co">
           {job.company}
           <span className="tag">
             {job.source === "manual" ? "Added manually" : capital(job.source)}
           </span>
-          {job.url && (
-            <a
-              className="linkbtn posting"
-              href={job.url}
-              target="_blank"
-              rel="noopener"
-              title="Open the original posting"
-            >
-              Posting <ArrowUpRight size={14} />
-            </a>
-          )}
-          {onClose && (
+          {!page && posting}
+          {onClose && !page && (
             <button className="iconbtn bare close" onClick={onClose} aria-label="Close details">
               <X size={15} />
             </button>
@@ -251,29 +277,25 @@ export function JobInspector({
           )}
           <dt>Extra effort</dt>
           <dd>{effort || "None"}</dd>
-          <dt>Status</dt>
-          <dd>
-            <Select
-              options={STATUS_OPTS}
-              value={
-                STATUS_OPTS.find((o) => o.value === (job.application_status ?? "")) ??
-                STATUS_OPTS[0]
-              }
-              isSearchable={false}
-              onChange={(o) => onStatus(job.id, (o as Option)?.value ?? "")}
-              formatOptionLabel={(o) => (o.value ? <StatusDot status={o.value} /> : o.label)}
-            />
-          </dd>
+          {!page && (
+            <>
+              <dt>Status</dt>
+              <dd>{statusSelect}</dd>
+            </>
+          )}
         </dl>
       </div>
 
-      <div className="insp-actions">
+      <div className={"insp-actions" + (page ? " m-actionbar" : "")}>
+        {page && <div className="m-status">{statusSelect}</div>}
         {!letter && (
           <button className="btn primary" onClick={() => draft()} disabled={drafting || noCv}>
             {drafting ? (
               <span className="btn-spin">
                 <Loader2 size={14} className="spin" /> Drafting...
               </span>
+            ) : page ? (
+              "Draft letter"
             ) : (
               "Draft cover letter"
             )}
