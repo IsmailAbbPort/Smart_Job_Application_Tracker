@@ -31,6 +31,56 @@ def test_scheduler_registers_daily_job_when_enabled(monkeypatch):
     assert scheduler._scheduler is None
 
 
+def _pipeline_stubs(monkeypatch, settings, calls):
+    from app import shortlist
+    from app.ai import role_family
+    from app.ingest import runner
+
+    class _Summary:
+        def as_dict(self):
+            return {"totals": {"inserted": 0}}
+
+    monkeypatch.setattr(scheduler, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "ingest_all", lambda session: calls.append("ingest") or _Summary())
+    monkeypatch.setattr(
+        role_family,
+        "get_role_classifier",
+        lambda s: role_family.FakeRoleClassifier() if s.anthropic_api_key else None,
+    )
+    monkeypatch.setattr(
+        shortlist,
+        "sweep_saved_shortlists",
+        lambda session: calls.append("sweep") or {"checked": 0, "deleted": 0},
+    )
+
+
+def test_pipeline_classifies_and_sweeps_without_openai_key(monkeypatch, session_factory):
+    # Regression: the pipeline returned early without OPENAI_API_KEY, so classification
+    # (now LLM-based) and the liveness sweep silently never ran.
+    from app.models import Job
+
+    with session_factory() as s:
+        s.add(Job(source="t", source_id="1", title="Corporate Paralegal", company="c", url="u"))
+        s.commit()
+    calls: list[str] = []
+    _pipeline_stubs(monkeypatch, Settings(openai_api_key=None, anthropic_api_key="k"), calls)
+
+    summary = scheduler.run_daily_pipeline(session_factory)
+
+    assert calls == ["ingest", "sweep"]
+    assert summary["embedded"] == 0 and summary["classified"] == 1
+    with session_factory() as s:
+        assert s.query(Job).one().role_family == "legal"
+
+
+def test_pipeline_sweeps_even_with_no_ai_keys(monkeypatch, session_factory):
+    calls: list[str] = []
+    _pipeline_stubs(monkeypatch, Settings(openai_api_key=None, anthropic_api_key=None), calls)
+    summary = scheduler.run_daily_pipeline(session_factory)
+    assert calls == ["ingest", "sweep"]
+    assert summary["classified"] == 0
+
+
 def test_start_scheduler_is_idempotent(monkeypatch):
     monkeypatch.setattr(scheduler, "get_settings", lambda: Settings(ingest_schedule_enabled=True))
     scheduler.stop_scheduler()

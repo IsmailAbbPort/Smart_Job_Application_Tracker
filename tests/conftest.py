@@ -27,6 +27,7 @@ import app.models  # noqa: E402, F401 - register tables on Base.metadata (after 
 from app.ai.cover_letter import FakeDrafter, get_drafter  # noqa: E402
 from app.ai.embedder import FakeEmbedder, get_embedder  # noqa: E402
 from app.ai.judge import FakeJudge, get_judge  # noqa: E402
+from app.ai.role_family import get_role_classifier  # noqa: E402
 from app.db import Base, get_session  # noqa: E402
 from app.ingest.base import CanonicalJob  # noqa: E402
 from app.main import app as fastapi_app  # noqa: E402
@@ -117,6 +118,9 @@ def client(session_factory) -> Iterator[TestClient]:
             yield s
 
     fastapi_app.dependency_overrides[get_session] = override
+    # No LLM role classifier by default (the real one would call Anthropic with a
+    # key from .env); tests that need it override with FakeRoleClassifier.
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: None
     with TestClient(fastapi_app) as c:
         yield c
     fastapi_app.dependency_overrides.clear()
@@ -131,6 +135,7 @@ def embed_client(session_factory) -> Iterator[TestClient]:
             yield s
 
     fastapi_app.dependency_overrides[get_session] = override
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: None
     fastapi_app.dependency_overrides[get_embedder] = lambda: FakeEmbedder(dim=TEST_EMBED_DIM)
     with TestClient(fastapi_app) as c:
         yield c
@@ -146,6 +151,7 @@ def judge_client(session_factory) -> Iterator[TestClient]:
             yield s
 
     fastapi_app.dependency_overrides[get_session] = override
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: None
     fastapi_app.dependency_overrides[get_judge] = lambda: FakeJudge()
     with TestClient(fastapi_app) as c:
         yield c
@@ -161,6 +167,7 @@ def letter_client(session_factory) -> Iterator[TestClient]:
             yield s
 
     fastapi_app.dependency_overrides[get_session] = override
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: None
     fastapi_app.dependency_overrides[get_drafter] = lambda: FakeDrafter()
     with TestClient(fastapi_app) as c:
         yield c

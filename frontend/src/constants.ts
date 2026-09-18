@@ -46,6 +46,11 @@ export const ROLE_FAMILIES = [
   { value: "people", label: "People" },
   { value: "finance_ops", label: "Finance & Ops" },
   { value: "media_content", label: "Media & Content" },
+  { value: "legal", label: "Legal" },
+  { value: "industrial_eng", label: "Industrial & Hardware" },
+  { value: "hospitality_retail", label: "Hospitality, Retail & Logistics" },
+  { value: "consulting_research", label: "Consulting & Research" },
+  { value: "other", label: "Other" },
 ];
 
 export const CURRENCIES = [

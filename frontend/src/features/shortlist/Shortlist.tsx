@@ -23,6 +23,10 @@ import { exportCsv, exportPdf, exportTxt } from "./exports";
 import { advancedCount, buildParams, filtersToPrefs, type FilterState } from "./filterState";
 
 const RERANK_N = 10;
+// After a shortlist loads, the server checks its Arbeitnow/Remotive postings in the
+// background (throttled to ~1/s) and deletes expired ones. Re-ask which shown jobs
+// still exist at these delays and drop the rest from the table.
+const EXPIRY_POLL_MS = [5000, 15000, 35000];
 
 const label = (opts: Option[], v: string) => opts.find((o) => o.value === v)?.label ?? v;
 const list = (vs: string[], max = 2) =>
@@ -63,6 +67,7 @@ export function Shortlist({
   runToken,
   onCount,
   onSaveView,
+  suggestedRoles,
   cvs,
   onSelectCv,
   onUploadCv,
@@ -77,6 +82,7 @@ export function Shortlist({
   runToken: number;
   onCount: (n: number | null) => void;
   onSaveView: (name: string, f: FilterState) => Promise<void>;
+  suggestedRoles: string[];
   // The phone layout has no sidebar, so the CV switcher and saved views live here.
   cvs: Cv[];
   onSelectCv: (id: string) => void;
@@ -105,9 +111,45 @@ export function Shortlist({
   filtersRef.current = filters;
   const cvIdRef = useRef(cvId);
   cvIdRef.current = cvId;
+  const onCountRef = useRef(onCount);
+  onCountRef.current = onCount;
+  const expiryTimers = useRef<number[]>([]);
+
+  const clearExpiryPolls = () => {
+    expiryTimers.current.forEach((t) => window.clearTimeout(t));
+    expiryTimers.current = [];
+  };
+
+  // Only ever prunes the run these ids came from: a newer run clears the timers.
+  const pollExpired = (ids: number[]) => {
+    clearExpiryPolls();
+    if (!ids.length) return;
+    expiryTimers.current = EXPIRY_POLL_MS.map((ms) =>
+      window.setTimeout(async () => {
+        try {
+          const alive = new Set((await api.existingJobs(ids)).ids);
+          setResults((prev) => {
+            if (!prev) return prev;
+            const items = prev.items.filter((j) => alive.has(j.id));
+            if (items.length === prev.items.length) return prev;
+            onCountRef.current(items.length);
+            setSelectedId((cur) =>
+              items.some((j) => j.id === cur) ? cur : (items[0]?.id ?? null),
+            );
+            return { ...prev, items, count: items.length };
+          });
+        } catch {
+          /* a missed poll just leaves the row until the next one */
+        }
+      }, ms),
+    );
+  };
+
+  useEffect(() => clearExpiryPolls, []);
 
   const runShortlist = useCallback(async () => {
     const f = filtersRef.current;
+    clearExpiryPolls();
     setLoading(true);
     setJudged({});
     setMessage(null);
@@ -116,6 +158,7 @@ export function Shortlist({
       const data = await api.shortlist(buildParams(f, cvIdRef.current));
       setResults(data);
       onCount(data.count);
+      pollExpired(data.items.map((j) => j.id));
       setSelectedId((cur) =>
         data.items.some((j) => j.id === cur) ? cur : (data.items[0]?.id ?? null),
       );
@@ -544,6 +587,19 @@ export function Shortlist({
                 : ""}
           </span>
         </div>
+
+        {suggestedRoles.length > 0 && filters.roleFamilies.length === 0 && (
+          <div className="banner">
+            Suggested roles for this CV:{" "}
+            <b>{suggestedRoles.map((r) => label(ROLE_FAMILIES, r)).join(", ")}</b>{" "}
+            <button
+              className="linkbtn"
+              onClick={() => onFiltersChange({ ...filters, roleFamilies: suggestedRoles })}
+            >
+              Apply
+            </button>
+          </div>
+        )}
 
         {message && (
           <div className={"banner" + (message.error ? " error" : "")}>{message.text}</div>

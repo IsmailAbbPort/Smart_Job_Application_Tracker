@@ -227,6 +227,16 @@ def test_replace_file_reembeds_and_keeps_label(embed_client, session_factory):
         assert list(s.get(Cv, cv["id"]).embedding) != old_embedding
 
 
+def test_replace_file_refreshes_role_suggestions(embed_client):
+    from app.ai.role_family import FakeRoleClassifier, get_role_classifier
+
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: FakeRoleClassifier(["design"])
+    cv_id = _upload(embed_client).json()["id"]
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: FakeRoleClassifier(["data_ml"])
+    body = _replace(embed_client, cv_id).json()
+    assert body["suggested_role_families"] == ["data_ml"]
+
+
 def test_replace_file_accepts_pdf(embed_client):
     cv = _upload(embed_client).json()
     pdf = (FIXTURES / "sample_cv.pdf").read_bytes()

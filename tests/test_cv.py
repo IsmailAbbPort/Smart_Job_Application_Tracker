@@ -27,6 +27,30 @@ def test_create_cv_embeds_and_stores(embed_client, session_factory):
         assert cv.embedding is not None and len(cv.embedding) == 8
 
 
+def test_upload_stores_role_family_suggestions(embed_client, session_factory):
+    from app.ai.role_family import FakeRoleClassifier, get_role_classifier
+    from app.main import app as fastapi_app
+
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: FakeRoleClassifier(
+        ["engineering", "data_ml"]
+    )
+    payload = {"label": "cv", "filename": "cv.txt", "content_base64": _b64(b"Python engineer")}
+    body = embed_client.post("/cv/upload", json=payload).json()
+
+    assert body["suggested_role_families"] == ["engineering", "data_ml"]
+    assert embed_client.get("/cv").json()[0]["suggested_role_families"] == [
+        "engineering",
+        "data_ml",
+    ]
+    with session_factory() as s:
+        assert s.get(Cv, body["id"]).suggested_role_families == ["engineering", "data_ml"]
+
+
+def test_cv_suggestions_empty_without_llm(embed_client):
+    body = embed_client.post("/cv", json={"label": "CV", "content": "Python engineer"}).json()
+    assert body["suggested_role_families"] == []
+
+
 def test_list_and_get_cv(embed_client):
     created = embed_client.post("/cv", json={"label": "CV1", "content": "content here"}).json()
     listing = embed_client.get("/cv").json()

@@ -1,22 +1,22 @@
-import { useEffect, useState } from "react";
-import { ArrowUpRight, ChevronLeft, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { ArrowLeft, ArrowUpRight, ChevronLeft, Loader2, X } from "lucide-react";
 import { api } from "../../api";
 import { STAGES, stageOf } from "../../constants";
-import { effortText, fmtAgoLong, fmtSalary, isStale } from "../../format";
+import { effortText, fmtAgoLong, fmtDate, fmtSalary, isStale } from "../../format";
 import { Select, type Option } from "../../components/Select";
-import type { Job, Letter, Verdict } from "../../types";
+import type { Job, Letter, RequirementCheck, Verdict } from "../../types";
 
 const STATUS_OPTS: Option[] = [
   { value: "", label: "Not tracked" },
   ...STAGES.map((s) => ({ value: s.key, label: s.label })),
 ];
 
-const DIMENSIONS: [string, string][] = [
-  ["skills", "Skills"],
-  ["seniority", "Seniority"],
-  ["domain", "Domain"],
-  ["location_remote", "Location eligibility"],
-];
+const STATUS_LABEL: Record<RequirementCheck["status"], string> = {
+  met: "Met",
+  partial: "Partial",
+  absent: "Missing",
+};
 
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -28,6 +28,93 @@ export function StatusDot({ status }: { status?: string | null }) {
       <span className="dot" style={{ background: stage.color }} />
       {stage.label}
     </span>
+  );
+}
+
+// The explanation is hover/keyboard only: the tooltip is hidden on touch screens.
+export function ExpiredTag({ job, focusable }: { job: Job; focusable?: boolean }) {
+  const text = `This job is no longer listed on ${capital(job.source)} (noticed ${fmtDate(job.source_gone_at)}). The details shown are the last saved copy.`;
+  return (
+    <Tooltip.Provider delayDuration={150}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span className="tag expired" tabIndex={focusable ? 0 : undefined}>
+            Expired
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="tooltip-content hover-only" sideOffset={6}>
+            {text}
+            <Tooltip.Arrow className="tooltip-arrow" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
+function DescriptionPanel({ job, open, onBack }: { job: Job; open: boolean; onBack: () => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  const backRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setText(null);
+    setErr("");
+  }, [job.id]);
+
+  useEffect(() => {
+    if (open) backRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || text !== null) return;
+    let alive = true;
+    api
+      .jobDescription(job.id)
+      .then((d) => alive && setText(d.description))
+      .catch((e) => alive && setErr("Could not load the description: " + (e as Error).message));
+    return () => {
+      alive = false;
+    };
+  }, [open, job.id, text]);
+
+  return (
+    <div
+      className={"desc-panel" + (open ? " open" : "")}
+      role="dialog"
+      aria-label="Description"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onBack();
+        }
+      }}
+    >
+      <div className="desc-head">
+        <button
+          ref={backRef}
+          className="iconbtn bare"
+          onClick={onBack}
+          aria-label="Back to job details"
+        >
+          <ArrowLeft size={16} />
+        </button>
+        <h3>Description</h3>
+      </div>
+      <div className="desc-note">
+        Saved copy. Removed from {capital(job.source)} on {fmtDate(job.source_gone_at)}.
+      </div>
+      <div className="desc-body scroll-themed">
+        {err ? (
+          <div className="sec-err">{err}</div>
+        ) : text === null ? (
+          <div className="faint">Loading description...</div>
+        ) : (
+          text || <span className="faint">No description was saved for this job.</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -102,6 +189,8 @@ export function JobInspector({
   const [draftBody, setDraftBody] = useState("");
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
+  const descBtnRef = useRef<HTMLButtonElement>(null);
 
   // Load any stored verdict / letter for this job (free: no model call).
   useEffect(() => {
@@ -111,6 +200,7 @@ export function JobInspector({
     setVerdictErr("");
     setLetterErr("");
     setEditing(false);
+    setDescOpen(false);
     if (!cvId) return;
     setLoadingSaved(true);
     Promise.all([
@@ -193,16 +283,29 @@ export function JobInspector({
   const effort = effortText(job);
   const noCv = !cvId;
 
-  const posting = job.url && (
-    <a
+  // An expired posting has no live URL worth opening, so the link becomes the
+  // saved-copy panel instead. Shared by the desktop header and the phone nav.
+  const posting = job.source_gone_at ? (
+    <button
+      ref={descBtnRef}
       className="linkbtn posting"
-      href={job.url}
-      target="_blank"
-      rel="noopener"
-      title="Open the original posting"
+      onClick={() => setDescOpen(true)}
+      title="Read the last saved copy of the description"
     >
-      Posting <ArrowUpRight size={page ? 16 : 14} />
-    </a>
+      View description
+    </button>
+  ) : (
+    job.url && (
+      <a
+        className="linkbtn posting"
+        href={job.url}
+        target="_blank"
+        rel="noopener"
+        title="Open the original posting"
+      >
+        Posting <ArrowUpRight size={page ? 16 : 14} />
+      </a>
+    )
   );
   const statusSelect = (
     <Select
@@ -238,6 +341,7 @@ export function JobInspector({
           <span className="tag">
             {job.source === "manual" ? "Added manually" : capital(job.source)}
           </span>
+          {job.source_gone_at && <ExpiredTag job={job} focusable />}
           {!page && posting}
           {onClose && !page && (
             <button className="iconbtn bare close" onClick={onClose} aria-label="Close details">
@@ -350,37 +454,38 @@ export function JobInspector({
               <span className={"tier tier-" + verdict.verdict}>{capital(verdict.verdict)} fit</span>
             </div>
             <div className="verdict-line">{verdict.one_line_verdict}</div>
-            <div className="dims num">
-              {DIMENSIONS.map(([key, label]) => {
-                const s = verdict.dimension_scores?.[key];
-                return typeof s === "number" ? <DimRow key={key} label={label} score={s} /> : null;
-              })}
-            </div>
-            <div className="dimhint">
-              Location eligibility: whether you can work from where you live (remote region, time
-              zone, visa).
-            </div>
           </div>
         )}
-        {verdict && verdict.matched_requirements?.length > 0 && (
+        {verdict && verdict.dealbreakers?.length > 0 && (
           <div className="sec">
-            <h4>Matched requirements</h4>
-            {verdict.matched_requirements.map((m, i) => (
-              <div className="req" key={i}>
-                <b>{m.requirement}</b>
-                <span>{m.cv_evidence}</span>
+            <h4>Dealbreakers</h4>
+            {verdict.dealbreakers.map((d, i) => (
+              <div className="bullet bad" key={i}>
+                {d}
               </div>
             ))}
           </div>
         )}
-        {verdict && verdict.gaps?.length > 0 && (
+        {verdict && verdict.requirements?.length > 0 && (
           <div className="sec">
-            <h4>Gaps</h4>
-            {verdict.gaps.map((g, i) => (
-              <div className="bullet" key={i}>
-                {g}
-              </div>
-            ))}
+            <h4>Requirements</h4>
+            {[...verdict.requirements]
+              .sort(
+                (a, b) =>
+                  Number(a.importance !== "must_have") - Number(b.importance !== "must_have"),
+              )
+              .map((r, i) => (
+                <div className="req" key={i}>
+                  <b>
+                    <span className={"reqstatus " + r.status}>{STATUS_LABEL[r.status]}</span>
+                    {r.requirement}
+                    {r.importance === "nice_to_have" && (
+                      <span className="faint"> (nice to have)</span>
+                    )}
+                  </b>
+                  {r.cv_evidence && <span>{r.cv_evidence}</span>}
+                </div>
+              ))}
           </div>
         )}
 
@@ -454,18 +559,16 @@ export function JobInspector({
           </div>
         )}
       </div>
+      {job.source_gone_at && (
+        <DescriptionPanel
+          job={job}
+          open={descOpen}
+          onBack={() => {
+            setDescOpen(false);
+            descBtnRef.current?.focus();
+          }}
+        />
+      )}
     </aside>
-  );
-}
-
-function DimRow({ label, score }: { label: string; score: number }) {
-  return (
-    <>
-      <span>{label}</span>
-      <div className="fitbar">
-        <i style={{ width: `${Math.max(0, Math.min(100, score))}%` }} />
-      </div>
-      <span>{score}</span>
-    </>
   );
 }

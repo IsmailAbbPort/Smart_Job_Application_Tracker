@@ -5,11 +5,12 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from app.ai.judge import FakeJudge, get_judge
+from app.ai.decide import CandidateRules, decide
+from app.ai.judge import AnthropicJudge, FakeJudge, get_judge
 from app.config import Settings, get_settings
 from app.main import app as fastapi_app
-from app.models import Cv, Job
-from app.schemas import MatchVerdict
+from app.models import Cv, Job, Match
+from app.schemas import JudgeFacts
 
 
 def _seed(
@@ -35,22 +36,41 @@ def _seed(
 # --- FakeJudge / gate (unit) ---
 
 
-def test_fake_judge_returns_valid_verdict():
-    verdict = FakeJudge().judge("Python FastAPI engineer", "Python FastAPI role")
-    assert isinstance(verdict, MatchVerdict)
-    assert 0 <= verdict.overall_score <= 100
-    assert verdict.matched_requirements  # some overlap surfaced
+def _objects(schema):
+    if isinstance(schema, dict):
+        if schema.get("type") == "object":
+            yield schema
+        for value in schema.values():
+            yield from _objects(value)
+    elif isinstance(schema, list):
+        for value in schema:
+            yield from _objects(value)
+
+
+def test_anthropic_judge_tool_is_strict():
+    # Regression: claude-sonnet-4-6 returned dimension_scores as malformed JSON text
+    # ('{"skills": 2, "seniority": 10, "domain", 2, ...}'), which crashed the judge.
+    # Strict tool use makes the API guarantee the input matches the schema.
+    tool = AnthropicJudge(api_key="test")._tool
+    assert tool["strict"] is True
+    objects = list(_objects(tool["input_schema"]))
+    assert objects and all(o.get("additionalProperties") is False for o in objects)
+    assert "'maximum':" not in str(tool["input_schema"])  # unsupported in strict mode
+
+
+def test_fake_judge_returns_valid_facts():
+    facts = FakeJudge().judge("Python FastAPI engineer", "Python FastAPI role")
+    assert isinstance(facts, JudgeFacts)
+    assert any(r.status == "met" for r in facts.requirements)  # some overlap surfaced
+
+
+def _score(cv: str, job: str) -> int:
+    return decide(FakeJudge().judge(cv, job), CandidateRules()).overall_score
 
 
 def test_fake_judge_monotonic_in_overlap():
-    high = (
-        FakeJudge()
-        .judge("python fastapi postgres docker", "python fastapi postgres docker")
-        .overall_score
-    )
-    low = (
-        FakeJudge().judge("python fastapi postgres docker", "rust embedded firmware").overall_score
-    )
+    high = _score("python fastapi postgres docker", "python fastapi postgres docker")
+    low = _score("python fastapi postgres docker", "rust embedded firmware")
     assert high > low
 
 
@@ -71,7 +91,7 @@ def test_judge_persists_and_caches(judge_client, session_factory):
     assert body["job_id"] == job_id and body["cv_id"] == cv_id
     assert body["model"] == "fake-judge"
     assert 0 <= body["overall_score"] <= 100
-    assert set(body["dimension_scores"]) == {"skills", "seniority", "domain", "location_remote"}
+    assert body["requirements"] and body["dealbreakers"] == []
 
     # GET returns the stored verdict.
     got = judge_client.get(f"/match/{job_id}", params={"cv_id": cv_id})
@@ -88,6 +108,47 @@ def test_judge_defaults_to_latest_cv(judge_client, session_factory):
 def test_get_match_404_before_judged(judge_client, session_factory):
     cv_id, job_id = _seed(session_factory)
     assert judge_client.get(f"/match/{job_id}", params={"cv_id": cv_id}).status_code == 404
+
+
+def _legacy_row(session_factory, cv_id, job_id, facts=None):
+    with session_factory() as s:
+        s.add(
+            Match(
+                cv_id=cv_id,
+                job_id=job_id,
+                overall_score=40,
+                verdict="medium",
+                one_line_verdict="old",
+                matched_requirements=[],
+                gaps=[],
+                facts=facts,
+                model="old-judge",
+            )
+        )
+        s.commit()
+
+
+def test_pre_facts_row_counts_as_not_judged(judge_client, session_factory):
+    cv_id, job_id = _seed(session_factory)
+    _legacy_row(session_factory, cv_id, job_id)
+    assert judge_client.get(f"/match/{job_id}", params={"cv_id": cv_id}).status_code == 404
+    body = judge_client.post(f"/match/{job_id}", params={"cv_id": cv_id}).json()
+    assert body["model"] == "fake-judge"  # re-judged, not served from the stale row
+
+
+def test_verdict_regrades_when_preferences_change(judge_client, session_factory):
+    # The tier is computed on read from stored facts, so switching to remote-only turns
+    # an on-site role into a dealbreaker with no new judge call.
+    cv_id, job_id = _seed(session_factory)
+    facts = FakeJudge().judge("python fastapi", "python fastapi").model_dump(mode="json")
+    facts["constraints"]["work_mode"] = "onsite"
+    _legacy_row(session_factory, cv_id, job_id, facts=facts)
+
+    before = judge_client.get(f"/match/{job_id}", params={"cv_id": cv_id}).json()
+    assert before["verdict"] == "strong" and before["dealbreakers"] == []
+    assert judge_client.put("/preferences", json={"remote_only": True}).status_code == 200
+    after = judge_client.get(f"/match/{job_id}", params={"cv_id": cv_id}).json()
+    assert after["verdict"] == "weak" and "remote only" in after["dealbreakers"][0]
 
 
 def test_judge_missing_job_404(judge_client, session_factory):

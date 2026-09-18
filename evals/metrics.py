@@ -170,6 +170,23 @@ def cohens_kappa(
 # --- Calibration (judge scores) ------------------------------------------------
 
 
+def gwet_ac1(y_true: Sequence[str], y_pred: Sequence[str], labels: Sequence[str]) -> float:
+    """Gwet's AC1: chance-corrected agreement that, unlike kappa, is not dragged down when
+    one class dominates (most golden pairs are weak)."""
+    pairs = list(zip(y_true, y_pred, strict=True))
+    n = len(pairs)
+    q = len(labels)
+    if n == 0 or q < 2:
+        return 0.0
+    observed = mean([1.0 if t == p else 0.0 for t, p in pairs])
+    counts = Counter(t for t, _ in pairs) + Counter(p for _, p in pairs)
+    pi = [counts[label] / (2 * n) for label in labels]
+    expected = sum(x * (1 - x) for x in pi) / (q - 1)
+    if expected >= 1.0:
+        return 1.0 if observed >= 1.0 else 0.0
+    return (observed - expected) / (1.0 - expected)
+
+
 def calibration_bins(
     probs: Sequence[float], outcomes: Sequence[bool], n_bins: int = 10
 ) -> list[dict]:

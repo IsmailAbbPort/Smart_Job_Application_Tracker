@@ -10,7 +10,6 @@ from app.config import Settings
 from app.models import Cv, Job, Match, User
 from app.schemas import (
     CoverLetterResult,
-    DimensionScores,
     FabricationCheck,
     FabricationClaim,
     MatchedRequirement,
@@ -58,12 +57,38 @@ def test_get_drafter_requires_key():
     assert exc.value.status_code == 503
 
 
+_FACTS = {
+    "requirements": [
+        {
+            "requirement": "FastAPI services",
+            "importance": "must_have",
+            "cv_evidence": "Built a FastAPI service",
+            "status": "met",
+            "core": True,
+        }
+    ],
+    "constraints": {
+        "work_mode": "onsite",
+        "location": "Berlin",
+        "work_countries": ["DE"],
+        "candidate_work_rights": ["EU"],
+        "citizenship_or_clearance": "",
+        "citizenship_or_clearance_ok": "unknown",
+        "required_languages": [],
+        "candidate_languages": ["en"],
+        "min_years_experience": None,
+        "candidate_years_experience": 2,
+        "seniority": "mid",
+    },
+    "summary": "strong fit",
+}
+
+
 def _verdict(requirement: str = "FastAPI services") -> MatchVerdict:
     return MatchVerdict(
         overall_score=80,
         verdict=MatchTier.strong,
         one_line_verdict="strong fit",
-        dimension_scores=DimensionScores(skills=80, seniority=70, domain=75, location_remote=90),
         matched_requirements=[
             MatchedRequirement(requirement=requirement, cv_evidence="Built a FastAPI service")
         ],
@@ -157,19 +182,12 @@ def test_draft_grounds_in_stored_match_verdict(letter_client, session_factory):
             Match(
                 cv_id=cv_id,
                 job_id=job_id,
-                overall_score=82,
+                overall_score=90,
                 verdict="strong",
                 one_line_verdict="strong fit",
-                dimension_scores={
-                    "skills": 82,
-                    "seniority": 70,
-                    "domain": 75,
-                    "location_remote": 90,
-                },
-                matched_requirements=[
-                    {"requirement": "FastAPI services", "cv_evidence": "Built a FastAPI service"}
-                ],
+                matched_requirements=[],
                 gaps=[],
+                facts=_FACTS,
                 model="fake-judge",
             )
         )
@@ -180,9 +198,8 @@ def test_draft_grounds_in_stored_match_verdict(letter_client, session_factory):
 
 
 def test_draft_survives_partial_match_row(letter_client, session_factory):
-    # A partial/legacy Match row (empty JSON sub-fields) must degrade to an ungrounded
-    # draft, not 500: rebuilding MatchVerdict from it raises ValidationError, which the
-    # route now swallows. Regression for the code-review finding.
+    # A legacy Match row (judged before facts existed) or unreadable facts must degrade
+    # to an ungrounded draft, not 500. Regression for the code-review finding.
     cv_id, job_id = _seed(session_factory)
     with session_factory() as s:
         s.add(
@@ -192,9 +209,9 @@ def test_draft_survives_partial_match_row(letter_client, session_factory):
                 overall_score=0,
                 verdict="weak",
                 one_line_verdict="",
-                dimension_scores={},  # empty -> DimensionScores validation would fail
                 matched_requirements=[],
                 gaps=[],
+                facts={"requirements": "not a list"},  # unreadable -> ungrounded draft
                 model="x",
             )
         )

@@ -4,37 +4,37 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
-from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.ai.decide import CandidateRules, decide, rules_from_preferences, verdict_from_facts
 from app.ai.embedder import Embedder, build_job_document, get_embedder
 from app.ai.judge import Judge, build_job_text, get_judge
-from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
-from app.ai.role_family import RoleClassifier
+from app.ai.role_family import AnthropicRoleClassifier, RoleClassifier, get_role_classifier
 from app.applications import annotate_application_status, job_visible_to
 from app.auth import get_current_user_optional
 from app.config import Settings, get_settings
 from app.db import get_session
-from app.ingest.eligibility import timezone_overlap_hours
 from app.models import MANUAL_SOURCE, Cv, Job, Match, SearchPreferences, User
-from app.prefs import get_preferences, preference_filters
+from app.prefs import get_preferences
 from app.ratelimit import charge
 from app.schemas import (
     JobOut,
     MatchOut,
-    MatchVerdict,
     RerankRequest,
     ShortlistItem,
     ShortlistResponse,
 )
+from app.shortlist import (
+    ShortlistQuery,
+    aggregator_ids,
+    check_shortlist_liveness,
+    rank_shortlist,
+    resolve_cv,
+)
 
-# How many fit-ranked candidates to pull before the recency re-rank. A few times
-# the page size is plenty for a gentle, floored decay to reshuffle near-ties.
-_CANDIDATE_MULTIPLIER = 3
-_MAX_CANDIDATES = 300
 # Cap on how many jobs one rerank call will judge (each is an LLM call + spend).
 _MAX_RERANK = 20
 
@@ -42,35 +42,28 @@ router = APIRouter(prefix="/match", tags=["match"])
 
 
 def _resolve_cv(session: Session, cv_id: int | None, owner_id: int | None = None) -> Cv:
-    """The requested CV, or the owner's most recent one. 404 if there is none.
-
-    Scopes to owner_id (None = guest) so accounts only see their own CVs.
-    """
-    if cv_id:
-        cv = session.get(Cv, cv_id)
-        if cv is not None and cv.owner_id != owner_id:
-            cv = None
-    else:
-        cv = session.scalar(
-            select(Cv).where(Cv.owner_id == owner_id).order_by(Cv.created_at.desc()).limit(1)
-        )
+    """The requested CV, or the owner's most recent one. 404 if there is none."""
+    cv = resolve_cv(session, cv_id, owner_id)
     if cv is None:
         raise HTTPException(status_code=404, detail="no CV found; POST /cv first")
     return cv
 
 
-def _to_match_out(match: Match) -> MatchOut:
+def _rules(session: Session, owner_id: int | None) -> CandidateRules:
+    return rules_from_preferences(get_preferences(session, owner_id))
+
+
+def _to_match_out(match: Match, rules: CandidateRules, job: Job | None) -> MatchOut | None:
+    """The stored facts graded under the user's current rules; None for a pre-facts row."""
+    verdict = verdict_from_facts(match.facts, rules, job.is_remote if job else None)
+    if verdict is None:
+        return None
     return MatchOut(
         job_id=match.job_id,
         cv_id=match.cv_id,
         model=match.model,
         created_at=match.created_at,
-        overall_score=match.overall_score,
-        verdict=match.verdict,
-        one_line_verdict=match.one_line_verdict,
-        dimension_scores=match.dimension_scores,
-        matched_requirements=match.matched_requirements,
-        gaps=match.gaps,
+        **verdict.model_dump(),
     )
 
 
@@ -105,14 +98,15 @@ def embed_jobs(
 @router.post("/classify-roles")
 def classify_roles(
     session: Session = Depends(get_session),
-    embedder: Embedder = Depends(get_embedder),
+    llm: AnthropicRoleClassifier | None = Depends(get_role_classifier),
     settings: Settings = Depends(get_settings),
     force: bool = Query(default=False, description="Re-classify all jobs, not just unclassified"),
     limit: int = Query(default=6000, ge=1, le=20000, description="Max jobs to classify this call"),
 ) -> dict:
     """Assign each job a role_family from its title (see app/ai/role_family.py).
 
-    Title-only, so it is boilerplate-free and independent of the retrieve embedding.
+    Uses the LLM classifier when ANTHROPIC_API_KEY is set, else the embedding
+    fallback (which needs OPENAI_API_KEY; 503 when neither is configured).
     Idempotent: classifies rows without a family unless force re-does all.
     """
     stmt = select(Job).where(Job.source != MANUAL_SOURCE)
@@ -122,12 +116,17 @@ def classify_roles(
 
     distribution: dict[str, int] = {}
     if jobs:
-        classifier = RoleClassifier.from_embedder(
-            embedder,
-            min_similarity=settings.role_min_similarity,
-            min_margin=settings.role_min_margin,
-        )
-        families = classifier.classify_titles([j.title for j in jobs], embedder)
+        titles = [j.title for j in jobs]
+        if llm is not None:
+            families = llm.classify_titles(titles)
+        else:
+            embedder = get_embedder(settings)
+            classifier = RoleClassifier.from_embedder(
+                embedder,
+                min_similarity=settings.role_min_similarity,
+                min_margin=settings.role_min_margin,
+            )
+            families = classifier.classify_titles(titles, embedder)
         for job, family in zip(jobs, families, strict=True):
             job.role_family = family
             key = family or "unclassified"
@@ -148,6 +147,7 @@ def classify_roles(
 
 @router.get("/shortlist", response_model=ShortlistResponse)
 def shortlist(
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
     cv_id: int | None = Query(default=None, description="CV to match; defaults to the latest"),
     limit: int = Query(default=25, ge=1, le=100),
@@ -183,12 +183,11 @@ def shortlist(
     settings: Settings = Depends(get_settings),
     user: User | None = Depends(get_current_user_optional),
 ) -> ShortlistResponse:
-    """Cosine-rank embedded jobs against the CV, then adjust for freshness.
+    """Cosine-rank embedded jobs against the CV, then adjust for freshness
+    (see app/shortlist.py).
 
-    Fit (cosine) is the primary signal; a floored recency decay then reshuffles
-    comparably-fit jobs so newer ones rank higher, without burying a clearly-better
-    older match. Saved search preferences (remote/europe defaults + blocklist +
-    freshness cutoff) apply unless overridden per request or bypassed with ignore_prefs.
+    Also remembers this query (the nightly liveness sweep replays it) and, after
+    responding, checks the shown Arbeitnow/Remotive jobs for expired postings.
     """
     owner_id = user.id if user else None
     cv = _resolve_cv(session, cv_id, owner_id)
@@ -197,10 +196,9 @@ def shortlist(
 
     # Accept both repeated params (?cities=a&cities=b) and comma lists (?cities=a,b).
     city_list = [c for raw in (cities or []) for c in raw.split(",")] or None
-
-    prefs = SearchPreferences() if ignore_prefs else get_preferences(session, owner_id)
-    filters = preference_filters(
-        prefs,
+    query = ShortlistQuery(
+        cv_id=cv_id,
+        limit=limit,
         is_remote=is_remote,
         europe=europe,
         region=region,
@@ -212,56 +210,14 @@ def shortlist(
         min_salary_currency=min_salary_currency,
         require_salary=require_salary,
         max_experience_gap=max_experience_gap,
+        ignore_prefs=ignore_prefs,
     )
 
-    # Over-fetch by fit, then re-rank by fit x freshness x experience penalty.
-    candidate_limit = min(limit * _CANDIDATE_MULTIPLIER, _MAX_CANDIDATES)
-    ranked = rank_jobs(session, list(cv.embedding), filters=filters, limit=candidate_limit)
-
-    # Normalize fit across the candidate set before applying the recency/experience
-    # multipliers. Cosine values cluster in a narrow band (~0.49-0.55), so multiplying
-    # raw cosine by a recency weight that swings 0.85-1.0 lets freshness dominate fit
-    # (a fresh mediocre role would outrank a stale strong one). Min-max normalizing
-    # spreads fit to [0, 1] so recency/experience become gentle tiebreakers, not the
-    # primary signal. When all candidates tie, every fit is treated as best (1.0).
-    sims = [s for _, s in ranked]
-    lo, hi = (min(sims), max(sims)) if sims else (0.0, 1.0)
-    span = hi - lo
-
-    # Languages the user speaks -> drop jobs requiring one they don't (hard filter).
-    # In Python (not SQL) because required_languages is a JSON array. Empty = off.
-    known_langs = {c.strip().lower() for c in (prefs.known_languages or []) if c.strip()}
-
-    now = datetime.now(UTC)
-    scored = []  # (job, similarity, recency, overlap, gap, rank_score)
-    for job, similarity in ranked:
-        if known_langs and set(job.required_languages or []) - known_langs:
-            continue  # requires a language the user doesn't have
-        # Timezone-overlap eligibility (see prefs.py: done here, not in SQL).
-        overlap = timezone_overlap_hours(job.required_utc_offsets, prefs.user_utc_offset)
-        if (
-            prefs.min_timezone_overlap_hours is not None
-            and overlap is not None
-            and overlap < prefs.min_timezone_overlap_hours
-        ):
-            continue
-        recency = recency_weight(
-            job.posted_at,
-            now,
-            half_life_days=settings.recency_half_life_days,
-            floor=settings.recency_floor,
-        )
-        # Soft experience penalty: over-experienced roles rank lower but stay visible.
-        gap = experience_gap(job.min_years_experience, prefs.years_experience)
-        exp = experience_weight(
-            gap,
-            penalty_per_year=settings.experience_penalty_per_year,
-            floor=settings.experience_floor,
-        )
-        fit = (similarity - lo) / span if span else 1.0
-        scored.append((job, similarity, recency, overlap, gap, fit * recency * exp))
-
-    scored.sort(key=lambda t: t[5], reverse=True)
+    saved = get_preferences(session, owner_id)
+    saved.last_shortlist_query = query.as_dict()
+    session.commit()
+    prefs = SearchPreferences() if ignore_prefs else saved
+    rows = rank_shortlist(session, cv, prefs, query, settings)
 
     items = [
         ShortlistItem(
@@ -271,9 +227,13 @@ def shortlist(
             timezone_overlap_hours=overlap,
             experience_gap=gap,
         )
-        for job, similarity, recency, overlap, gap, _score in scored[:limit]
+        for job, similarity, recency, overlap, gap in rows
     ]
     annotate_application_status(session, items, owner_id)
+
+    to_check = aggregator_ids(rows)
+    if to_check:
+        background_tasks.add_task(check_shortlist_liveness, session.get_bind(), to_check, settings)
     return ShortlistResponse(cv_id=cv.id, count=len(items), items=items)
 
 
@@ -283,23 +243,27 @@ def _judge_and_store(
     cv: Cv,
     job: Job,
     refresh: bool,
+    rules: CandidateRules,
     charge_cm: Callable[[], AbstractContextManager[None]] | None = None,
 ) -> Match:
-    """Judge one (cv, job) and persist the verdict. Returns the cached row unless refresh.
+    """Judge one (cv, job) and persist the facts. Returns the cached row unless refresh
+    (a row judged before facts existed is re-judged).
 
     charge_cm (when given) wraps the actual LLM call so the rate limiter charges only
     a real judge invocation, never a cache hit (see app/ratelimit.charge).
     """
     existing = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
-    if existing is not None and not refresh:
+    if existing is not None and existing.facts and not refresh:
         return existing
     with charge_cm() if charge_cm else nullcontext():
-        verdict: MatchVerdict = judge.judge(cv.content, build_job_text(job))
+        facts = judge.judge(cv.content, build_job_text(job))
+    verdict = decide(facts, rules, job.is_remote)
     match = existing or Match(cv_id=cv.id, job_id=job.id)
+    match.facts = facts.model_dump(mode="json")
     match.overall_score = verdict.overall_score
     match.verdict = verdict.verdict.value
     match.one_line_verdict = verdict.one_line_verdict
-    match.dimension_scores = verdict.dimension_scores.model_dump()
+    match.dimension_scores = {}
     match.matched_requirements = [r.model_dump() for r in verdict.matched_requirements]
     match.gaps = verdict.gaps
     match.model = getattr(judge, "model", "")
@@ -326,23 +290,27 @@ def rerank(
     """
     owner_id = user.id if user else None
     cv = _resolve_cv(session, payload.cv_id, owner_id)
+    rules = _rules(session, owner_id)
     verdicts: list[MatchOut] = []
     for job_id in payload.job_ids[:_MAX_RERANK]:
         job = session.get(Job, job_id)
         if job is None or not job_visible_to(session, job, owner_id):
             continue
-        verdicts.append(
-            _to_match_out(
-                _judge_and_store(
-                    session,
-                    judge,
-                    cv,
-                    job,
-                    payload.refresh,
-                    charge_cm=lambda: charge(session, request, owner_id, "judge"),
-                )
-            )
+        out = _to_match_out(
+            _judge_and_store(
+                session,
+                judge,
+                cv,
+                job,
+                payload.refresh,
+                rules,
+                charge_cm=lambda: charge(session, request, owner_id, "judge"),
+            ),
+            rules,
+            job,
         )
+        if out is not None:
+            verdicts.append(out)
     # Highest judge score first; cosine order (input order) breaks ties stably.
     verdicts.sort(key=lambda m: m.overall_score, reverse=True)
     return verdicts
@@ -368,16 +336,23 @@ def judge_job(
     job = session.get(Job, job_id)
     if job is None or not job_visible_to(session, job, owner_id):
         raise HTTPException(status_code=404, detail="job not found")
-    return _to_match_out(
+    rules = _rules(session, owner_id)
+    out = _to_match_out(
         _judge_and_store(
             session,
             judge,
             cv,
             job,
             refresh,
+            rules,
             charge_cm=lambda: charge(session, request, owner_id, "judge"),
-        )
+        ),
+        rules,
+        job,
     )
+    if out is None:
+        raise HTTPException(status_code=502, detail="the judge returned unreadable facts")
+    return out
 
 
 @router.get("/{job_id}", response_model=MatchOut)
@@ -390,8 +365,14 @@ def get_match(
     user: User | None = Depends(get_current_user_optional),
 ) -> MatchOut:
     """Return the stored judge verdict for a job. 404 if it has not been judged yet."""
-    cv = _resolve_cv(session, cv_id, user.id if user else None)
+    owner_id = user.id if user else None
+    cv = _resolve_cv(session, cv_id, owner_id)
     match = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job_id))
-    if match is None:
+    out = (
+        _to_match_out(match, _rules(session, owner_id), session.get(Job, job_id))
+        if match is not None
+        else None
+    )
+    if out is None:
         raise HTTPException(status_code=404, detail="not judged yet; POST /match/{job_id} first")
-    return _to_match_out(match)
+    return out

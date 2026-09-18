@@ -121,6 +121,19 @@ def list_countries(session: Session = Depends(get_session)) -> list[dict]:
     return [{"name": name, "count": count} for name, count in rows]
 
 
+@router.get("/existing")
+def existing_jobs(
+    session: Session = Depends(get_session),
+    ids: list[int] = Query(max_length=200, description="Job ids to look up"),
+) -> dict:
+    """Which of these job ids still exist (the shortlist drops ones swept as expired).
+
+    Read-only; never checks a posting itself, so polling it costs no outbound calls.
+    """
+    rows = session.scalars(select(Job.id).where(Job.id.in_(ids))).all()
+    return {"ids": sorted(rows)}
+
+
 @router.get("/{job_id}", response_model=JobDetail)
 def get_job(
     job_id: int,

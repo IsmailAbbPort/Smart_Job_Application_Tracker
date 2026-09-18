@@ -65,6 +65,8 @@ class GoldenPair(BaseModel):
     rationale: str = ""
     reviewed: bool = False
     cosine_rank: int | None = None  # rank in the live cosine shortlist when sampled
+    # tune: may be looked at while iterating on the judge. test: held out, scored only.
+    split: str = "tune"
     job: GoldenJob
 
     @property
@@ -84,12 +86,22 @@ class GoldenCv(BaseModel):
     source: str = ""
 
 
+class GoldenRules(BaseModel):
+    """The candidate preferences the labels assume (fed to app/ai/decide.py)."""
+
+    remote_only: bool = False
+    known_languages: list[str] = Field(default_factory=list)
+    years_experience: int | None = None
+    max_experience_gap: int | None = None
+
+
 class GoldenSet(BaseModel):
     """The whole labeled set: the CVs and every pair labeled against them."""
 
     version: int = 1
     status: str = "draft"  # draft (labels are my best guess) | reviewed (human-signed)
     notes: str = ""
+    rules: GoldenRules = Field(default_factory=GoldenRules)
     cvs: dict[str, GoldenCv]
     pairs: list[GoldenPair]
 

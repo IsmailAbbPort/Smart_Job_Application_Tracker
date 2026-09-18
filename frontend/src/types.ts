@@ -9,6 +9,7 @@ export interface Cv {
   filename?: string | null;
   size_bytes?: number | null;
   content_type?: string | null;
+  suggested_role_families?: string[];
 }
 
 export interface Job {
@@ -37,6 +38,7 @@ export interface Job {
   seniority?: string | null;
   role_family?: string | null;
   posted_at?: string | null;
+  source_gone_at?: string | null;
   application_status?: string | null;
 }
 
@@ -46,12 +48,20 @@ export interface ShortlistResponse {
   items: Job[];
 }
 
+export interface RequirementCheck {
+  requirement: string;
+  importance: "must_have" | "nice_to_have";
+  cv_evidence: string;
+  status: "met" | "partial" | "absent";
+}
+
 export interface Verdict {
   job_id: number;
   overall_score: number;
   verdict: "strong" | "medium" | "weak";
   one_line_verdict: string;
-  dimension_scores: Record<string, number>;
+  dealbreakers: string[];
+  requirements: RequirementCheck[];
   matched_requirements: { requirement: string; cv_evidence: string }[];
   gaps: string[];
 }

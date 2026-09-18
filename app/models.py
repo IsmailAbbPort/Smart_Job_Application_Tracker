@@ -173,6 +173,9 @@ class Cv(Base):
     content_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType(EMBED_DIM), nullable=True)
+    # Role families the LLM suggests for this CV (best first), offered as a filter
+    # default in the UI. Empty when no ANTHROPIC_API_KEY or the suggestion failed.
+    suggested_role_families: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -206,6 +209,10 @@ class Match(Base):
     dimension_scores: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     matched_requirements: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     gaps: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # The judge's extracted facts (JudgeFacts). The served score/tier are recomputed from
+    # these under the user's current rules; the columns above keep the grade at judge
+    # time. Null on rows judged before facts existed, which are treated as not judged.
+    facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     model: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
@@ -263,6 +270,9 @@ class SearchPreferences(Base):
     # Role families to keep (e.g. ["engineering", "data_ml"]). Empty = no role
     # filtering; when set, only jobs in these families (or unclassified) survive.
     include_role_families: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # The owner's most recent /match/shortlist parameters, replayed by the nightly
+    # liveness sweep so it checks the jobs this owner actually sees.
+    last_shortlist_query: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )

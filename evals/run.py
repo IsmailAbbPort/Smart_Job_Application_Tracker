@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.ai.cover_letter import AnthropicDrafter, Drafter, FakeDrafter
+from app.ai.decide import CandidateRules, decide
 from app.ai.embedder import (
     Embedder,
     FakeEmbedder,
@@ -29,10 +30,10 @@ from app.ai.embedder import (
     build_cv_document,
     build_job_document,
 )
-from app.ai.judge import AnthropicJudge, FakeJudge, Judge, build_job_text
+from app.ai.judge import FACTS_VERSION, AnthropicJudge, FakeJudge, Judge, build_job_text
 from app.ai.matching import cosine_similarity
 from app.config import get_settings
-from app.schemas import CoverLetterResult, MatchTier, MatchVerdict
+from app.schemas import CoverLetterResult, JudgeFacts, MatchTier
 from evals import metrics
 from evals.golden_set import GoldenCv, GoldenPair, GoldenSet, load_golden_set
 from evals.quality import AnthropicQualityJudge, FakeQualityJudge, LetterQuality, QualityJudge
@@ -97,23 +98,33 @@ def evaluate_matcher(
 
 
 def evaluate_judge(
-    cv_id: int, cv: GoldenCv, pairs: list[GoldenPair], judge: Judge, cache: JsonCache, refresh: bool
+    cv_id: int,
+    cv: GoldenCv,
+    pairs: list[GoldenPair],
+    judge: Judge,
+    cache: JsonCache,
+    refresh: bool,
+    rules: CandidateRules | None = None,
+    sample: int = 0,
 ) -> dict:
-    """Judge every pair, then score the predicted tiers against the labels
-    (classification) and the 0-100 scores against relevance (calibration)."""
+    """Extract facts for every pair, grade them under the golden set's rules, then score
+    the tiers against the labels (classification) and the 0-100 scores against relevance
+    (calibration). Facts are cached, so a rule change re-scores for free; `sample` > 0
+    caches a separate extraction to measure run-to-run variance."""
     model = getattr(judge, "model", "unknown")
+    rules = rules or CandidateRules()
     y_true: list[str] = []
     y_pred: list[str] = []
     probs: list[float] = []
     outcomes: list[bool] = []
     for pair in pairs:
-        key = f"{model}:{cv_id}:{pair.id}"
+        key = f"facts-v{FACTS_VERSION}:{model}:{cv_id}:{pair.id}" + (f"#{sample}" if sample else "")
         cached = None if refresh else cache.get(key)
         if cached is None:
-            verdict = judge.judge(cv.content, build_job_text(pair.job))
-            cached = verdict.model_dump(mode="json")
+            facts = judge.judge(cv.content, build_job_text(pair.job))
+            cached = facts.model_dump(mode="json")
             cache.set(key, cached)
-        verdict = MatchVerdict.model_validate(cached)
+        verdict = decide(JudgeFacts.model_validate(cached), rules, pair.job.is_remote)
         y_true.append(pair.label_tier.value)
         y_pred.append(verdict.verdict.value)
         probs.append(verdict.overall_score / 100.0)
@@ -126,6 +137,7 @@ def evaluate_judge(
         "accuracy": metrics.accuracy(y_true, y_pred),
         "kappa": metrics.cohens_kappa(y_true, y_pred, TIERS),
         "kappa_quadratic": metrics.cohens_kappa(y_true, y_pred, TIERS, weights="quadratic"),
+        "ac1": metrics.gwet_ac1(y_true, y_pred, TIERS),
         "per_label": prf["per_label"],
         "macro": prf["macro"],
         "confusion": metrics.confusion_matrix(y_true, y_pred, TIERS),
@@ -207,6 +219,8 @@ def run_eval(
     quality_cache: JsonCache | None = None,
     refresh: bool = False,
     letter_limit: int | None = None,
+    split: str | None = None,
+    sample: int = 0,
 ) -> dict:
     """Run the selected stages over the golden set and return a results dict.
 
@@ -223,14 +237,17 @@ def run_eval(
     per_cv: dict[int, dict] = {}
     for cv_id in cv_ids:
         cv = golden.cv_for(cv_id)
-        pairs = golden.pairs_for(cv_id)
+        pairs = [p for p in golden.pairs_for(cv_id) if split is None or p.split == split]
         if not pairs:
             continue
         result: dict = {"n_pairs": len(pairs)}
         if "matcher" in stages:
             result["matcher"] = evaluate_matcher(cv, pairs, embedder, ks)
         if "judge" in stages:
-            result["judge"] = evaluate_judge(cv_id, cv, pairs, judge, judge_cache, refresh)
+            rules = CandidateRules(**golden.rules.model_dump())
+            result["judge"] = evaluate_judge(
+                cv_id, cv, pairs, judge, judge_cache, refresh, rules, sample
+            )
         if "letter" in stages:
             result["letter"] = evaluate_letters(
                 cv_id,
@@ -280,6 +297,13 @@ def _aggregate(per_cv: dict[int, dict], ks: list[int], stages: set[str]) -> dict
             "accuracy": metrics.mean([c["judge"]["accuracy"] for c in cvs]),
             "kappa": metrics.mean([c["judge"]["kappa"] for c in cvs]),
             "kappa_quadratic": metrics.mean([c["judge"]["kappa_quadratic"] for c in cvs]),
+            "ac1": metrics.mean([c["judge"]["ac1"] for c in cvs]),
+            "strong_recall": metrics.mean(
+                [c["judge"]["per_label"]["strong"]["recall"] for c in cvs]
+            ),
+            "strong_precision": metrics.mean(
+                [c["judge"]["per_label"]["strong"]["precision"] for c in cvs]
+            ),
             "macro_f1": metrics.mean([c["judge"]["macro"]["f1"] for c in cvs]),
             "ece": metrics.mean([c["judge"]["ece"] for c in cvs]),
         }
@@ -357,6 +381,9 @@ def _print_report(results: dict) -> None:
         print(f"  accuracy         {_fmt(j['accuracy'])}")
         print(f"  macro F1         {_fmt(j['macro_f1'])}")
         print(f"  Cohen's kappa    {_fmt(j['kappa'])}  (quadratic {_fmt(j['kappa_quadratic'])})")
+        print(f"  Gwet's AC1       {_fmt(j['ac1'])}")
+        print(f"  strong recall    {_fmt(j['strong_recall'])}")
+        print(f"  strong precision {_fmt(j['strong_precision'])}")
         print(f"  ECE              {_fmt(j['ece'])}")
         first = next(iter(results["per_cv"].values()), {})
         if "judge" in first:
@@ -396,6 +423,8 @@ def main() -> None:
     parser.add_argument("--letter-limit", type=int, help="Cap the number of letters drafted")
     parser.add_argument("--refresh", action="store_true", help="Ignore the verdict cache")
     parser.add_argument("--golden", help="Path to the golden set JSON")
+    parser.add_argument("--split", choices=["tune", "test"], help="Score only this split")
+    parser.add_argument("--sample", type=int, default=0, help="Judge re-run index (variance)")
     parser.add_argument("--out", help="Write the full results JSON here (default evals/results/)")
     args = parser.parse_args()
 
@@ -424,6 +453,8 @@ def main() -> None:
         quality_cache=quality_cache,
         refresh=args.refresh,
         letter_limit=args.letter_limit,
+        split=args.split,
+        sample=args.sample,
     )
     results["meta"] = {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -435,7 +466,9 @@ def main() -> None:
     }
     _print_report(results)
 
-    out = Path(args.out) if args.out else _RESULTS_DIR / f"{results['meta']['judge_model']}.json"
+    suffix = (f"-{args.split}" if args.split else "") + (f"-s{args.sample}" if args.sample else "")
+    default_out = _RESULTS_DIR / f"{results['meta']['judge_model']}{suffix}.json"
+    out = Path(args.out) if args.out else default_out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(f"Wrote {out}")

@@ -245,12 +245,27 @@ function verdictFor(id: number): Verdict {
         : tier === "medium"
           ? "Solid fit with a couple of gaps worth addressing in the letter."
           : "Reachable stretch; lead with transferable strengths.",
-    dimension_scores: {
-      skills: Math.min(98, overall + 4),
-      seniority: Math.max(40, overall - 8),
-      domain: overall,
-      location_remote: job?.is_remote ? 92 : 70,
-    },
+    dealbreakers: tier === "weak" && !job?.is_remote ? ["On-site, and you want remote only"] : [],
+    requirements: [
+      {
+        requirement: "Python + ML tooling",
+        importance: "must_have",
+        cv_evidence: "Built and shipped LLM-backed features end to end.",
+        status: "met",
+      },
+      {
+        requirement: "Production web services",
+        importance: "must_have",
+        cv_evidence: "MERN stack in two full-time roles.",
+        status: "met",
+      },
+      {
+        requirement: "MLOps / production-scale training",
+        importance: tier === "strong" ? "nice_to_have" : "must_have",
+        cv_evidence: "",
+        status: "absent",
+      },
+    ],
     matched_requirements: [
       {
         requirement: "Python + ML tooling",
@@ -342,6 +357,10 @@ export const mockApi: Api = {
     { name: "Ireland", count: 14 },
     { name: "France", count: 12 },
   ],
+  jobDescription: async () => ({
+    description: "Demo mode does not include full job descriptions.",
+  }),
+  existingJobs: async (ids) => ({ ids }),
 
   // ---- Preferences ----
   getPrefs: async (): Promise<Preferences> => ({

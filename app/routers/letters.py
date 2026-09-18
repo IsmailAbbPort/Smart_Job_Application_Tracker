@@ -8,18 +8,19 @@ human-in-the-loop that keeps this honest - the app never "sends" anything).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.cover_letter import Drafter, get_drafter
+from app.ai.decide import rules_from_preferences, verdict_from_facts
 from app.ai.judge import build_job_text
 from app.applications import job_visible_to
 from app.auth import get_current_user_optional
 from app.db import get_session
 from app.models import CoverLetter, Cv, Job, Match, User
+from app.prefs import get_preferences
 from app.ratelimit import charge
-from app.schemas import CoverLetterOut, CoverLetterUpdate, FabricationReport, MatchVerdict
+from app.schemas import CoverLetterOut, CoverLetterUpdate, FabricationReport
 
 router = APIRouter(prefix="/letters", tags=["letters"])
 
@@ -83,22 +84,13 @@ def draft_letter(
 
     # If the job has already been judged for this CV, ground the letter in that verdict
     # (lead with the evidenced matches, avoid the gaps). None -> the drafter works from
-    # the CV + job alone, exactly as before. A partial/legacy Match row (empty JSON
-    # sub-fields) must degrade to an ungrounded draft, never 500 the draft route.
+    # the CV + job alone, exactly as before. A legacy Match row (no facts) or unreadable
+    # facts must degrade to an ungrounded draft, never 500 the draft route.
     match = session.scalar(select(Match).where(Match.cv_id == cv.id, Match.job_id == job.id))
     verdict = None
     if match is not None:
-        try:
-            verdict = MatchVerdict(
-                overall_score=match.overall_score,
-                verdict=match.verdict,
-                one_line_verdict=match.one_line_verdict,
-                dimension_scores=match.dimension_scores,
-                matched_requirements=match.matched_requirements,
-                gaps=match.gaps,
-            )
-        except ValidationError:
-            verdict = None
+        rules = rules_from_preferences(get_preferences(session, user.id if user else None))
+        verdict = verdict_from_facts(match.facts, rules, job.is_remote)
 
     with charge(session, request, user.id if user else None, "letter"):
         result = drafter.write(cv.content, build_job_text(job), verdict)

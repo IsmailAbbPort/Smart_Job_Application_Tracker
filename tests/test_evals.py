@@ -87,6 +87,17 @@ def test_cohens_kappa_unweighted():
     assert metrics.cohens_kappa(["a", "b"], ["a", "b"], ["a", "b"]) == pytest.approx(1.0)
 
 
+def test_gwet_ac1():
+    assert metrics.gwet_ac1(["a", "b"], ["a", "b"], ["a", "b"]) == pytest.approx(1.0)
+    # po = 3/4; pi_a = 5/8, pi_b = 3/8; pe = 2 * (5/8 * 3/8) = 15/32 -> (24/32-15/32)/(17/32).
+    y_true, y_pred = ["a", "a", "a", "b"], ["a", "a", "b", "b"]
+    assert metrics.gwet_ac1(y_true, y_pred, ["a", "b"]) == pytest.approx(9 / 17)
+    # Dominant class: kappa collapses toward 0, AC1 stays high.
+    y_true = ["weak"] * 9 + ["strong"]
+    y_pred = ["weak"] * 10
+    assert metrics.gwet_ac1(y_true, y_pred, TIERS) > metrics.cohens_kappa(y_true, y_pred, TIERS)
+
+
 def test_cohens_kappa_quadratic_rewards_near_misses():
     # An ordinal near-miss (strong vs medium) should score higher weighted than the
     # exact-match kappa, which treats it as a full error.
@@ -131,11 +142,11 @@ def test_golden_set_loads_and_is_labeled():
 
 
 def _crafted_golden_set() -> GoldenSet:
-    """A set the deterministic FakeJudge scores correctly: strong pairs share many
-    words with the CV (FakeJudge tiers on word overlap), weak pairs share almost none."""
+    """A set the deterministic FakeJudge scores correctly: strong pairs share every
+    posting word with the CV (each becomes a met requirement), weak pairs share none."""
     cv_text = (
-        "python fastapi postgres docker react typescript node redis kubernetes graphql "
-        "backend frontend engineer"
+        "full stack python fastapi postgres docker react typescript node redis kubernetes "
+        "graphql backend frontend engineer"
     )
     strong_job = GoldenJob(
         title="Full Stack Engineer",

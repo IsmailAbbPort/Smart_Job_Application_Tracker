@@ -38,10 +38,11 @@ def trigger_prune_dead(
     apply: bool = Query(default=False, description="Actually delete dead jobs (default: dry run)"),
     limit: int = Query(default=200, ge=1, le=5000, description="Max jobs to check this call"),
 ) -> dict:
-    """Check job URLs and report (or with apply=true, remove) dead 404/410 listings.
+    """Check Arbeitnow/Remotive job URLs and report (or with apply=true, remove) dead
+    404/410 listings.
 
-    Manual + dry-run by default. Tracked jobs (with an Application) are never pruned.
-    Scheduling a daily run is deferred to the scheduled-ingest work.
+    Manual + dry-run by default, throttled like the automatic sweeps (which run nightly
+    and when a shortlist is viewed). Tracked jobs (with an Application) are never pruned.
     """
     return prune_dead_jobs(session, limit=limit, apply=apply)
 

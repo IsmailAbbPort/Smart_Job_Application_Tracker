@@ -5,7 +5,7 @@ import { STAGES, stageOf } from "../../constants";
 import { fmtDate } from "../../format";
 import { useBackToClose, useIsMobile } from "../../hooks";
 import type { Application } from "../../types";
-import { JobInspector } from "../inspector/JobInspector";
+import { ExpiredTag, JobInspector } from "../inspector/JobInspector";
 import { AddApplicationModal } from "./AddApplicationModal";
 import { useHoldDrag } from "./useHoldDrag";
 
@@ -150,6 +150,7 @@ export function Board({ cvId }: { cvId: string }) {
           {a.applied_at ? "Applied " + fmtDate(a.applied_at) : "Not applied yet"}
         </span>
         {a.job.source === "manual" && <span className="tag">Manual</span>}
+        {a.job.source_gone_at && <ExpiredTag job={a.job} />}
       </div>
     </>
   );

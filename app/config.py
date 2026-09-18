@@ -77,9 +77,11 @@ class Settings(BaseSettings):
     experience_penalty_per_year: float = 0.06
     experience_floor: float = 0.6
 
-    # Role-family classifier (app/ai/role_family.py): a job title is assigned to the
-    # nearest role centroid only when the top cosine clears role_min_similarity and
+    # Role-family classifier (app/ai/role_family.py). role_model labels titles when
+    # ANTHROPIC_API_KEY is set. Without it, the embedding fallback assigns a title to
+    # the nearest role centroid only when the top cosine clears role_min_similarity and
     # beats the runner-up by role_min_margin; otherwise it stays unclassified (kept).
+    role_model: str = "claude-haiku-4-5-20251001"
     role_min_similarity: float = 0.30
     role_min_margin: float = 0.02
 
@@ -102,6 +104,15 @@ class Settings(BaseSettings):
     ingest_hour_utc: int = 3
     ingest_embed_limit: int = 5000
     ingest_classify_limit: int = 6000
+
+    # Liveness sweep of aggregator jobs (app/ingest/liveness.py). Outbound checks are
+    # serialized at one per liveness_min_interval_seconds so the aggregator's CDN
+    # never blocks us. The nightly run re-checks each owner's last shortlist; opening
+    # the shortlist re-checks its aggregator jobs not confirmed within the view window.
+    liveness_min_interval_seconds: float = 1.0
+    liveness_nightly_recheck_hours: float = 12.0
+    liveness_view_recheck_hours: float = 6.0
+    liveness_view_max_checks: int = 30
 
     @model_validator(mode="after")
     def _enforce_production_secrets(self) -> "Settings":

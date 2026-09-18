@@ -1,10 +1,47 @@
-"""Role-family classification (embedding-space) + the include_role_families filter."""
+"""Role-family classification (LLM + embedding fallback) + the include_role_families filter."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.ai import role_family
-from app.ai.role_family import RoleClassifier, assign_family, build_centroids
+from app.ai.role_family import (
+    FAMILIES,
+    AnthropicRoleClassifier,
+    RoleClassifier,
+    assign_family,
+    build_centroids,
+)
 from app.models import Job
+
+
+class _StubAnthropic:
+    """Stands in for the Anthropic SDK client: records calls, answers via `respond`.
+
+    `respond(prompt)` returns the tool input dict for that call, or raises to
+    simulate an API failure.
+    """
+
+    def __init__(self, respond):
+        self.calls: list[dict] = []
+        self._respond = respond
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        tool = kwargs["tools"][0]["name"]
+        payload = self._respond(kwargs["messages"][0]["content"])
+        return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name=tool, input=payload)])
+
+
+def _numbered(prompt: str) -> list[tuple[int, str]]:
+    """Parse the "<index>\t<title>" lines the classifier sends."""
+    out = []
+    for line in prompt.splitlines():
+        idx, sep, title = line.partition("\t")
+        if sep and idx.strip().isdigit():
+            out.append((int(idx), title))
+    return out
 
 
 class _StubEmbedder:
@@ -83,6 +120,107 @@ def test_classify_titles():
     )
     out = clf.classify_titles(["Backend Engineer", "Account Executive", "Mystery Role"], embedder)
     assert out == ["engineering", "sales", None]
+
+
+# --- LLM title classifier ---
+
+
+def test_llm_classifier_batches_and_maps_by_index():
+    def respond(prompt):
+        return {
+            "labels": [
+                {"index": i, "family": "sales" if "Account" in t else "engineering"}
+                for i, t in _numbered(prompt)
+            ]
+        }
+
+    stub = _StubAnthropic(respond)
+    titles = [f"Backend Engineer {i}" if i % 2 else f"Account Executive {i}" for i in range(130)]
+    out = AnthropicRoleClassifier(client=stub, batch_size=60).classify_titles(titles)
+
+    assert len(stub.calls) == 3  # 60 + 60 + 10
+    assert out == ["engineering" if i % 2 else "sales" for i in range(130)]
+
+
+def test_llm_classifier_unknown_or_missing_labels_are_none():
+    def respond(prompt):
+        return {"labels": [{"index": 0, "family": "astronaut"}, {"index": 1, "family": "legal"}]}
+
+    out = AnthropicRoleClassifier(client=_StubAnthropic(respond)).classify_titles(
+        ["A", "Corporate Paralegal", "C"]
+    )
+    assert out == [None, "legal", None]
+
+
+def test_llm_classifier_failed_batch_stays_unclassified():
+    # One batch erroring must not lose the others; its titles stay None (retried next run).
+    def respond(prompt):
+        if "boom" in prompt:
+            raise RuntimeError("api down")
+        return {"labels": [{"index": i, "family": "engineering"} for i, _ in _numbered(prompt)]}
+
+    out = AnthropicRoleClassifier(client=_StubAnthropic(respond), batch_size=2).classify_titles(
+        ["a", "b", "boom", "d"]
+    )
+    assert out == ["engineering", "engineering", None, None]
+
+
+def test_families_cover_the_non_engineering_leaks():
+    # Regression: legal/comms/office/expert-panel titles had no family, stayed null,
+    # and slipped through an engineering-only filter.
+    for fam in ("legal", "industrial_eng", "hospitality_retail", "consulting_research", "other"):
+        assert fam in FAMILIES
+    assert set(role_family.ROLE_PROTOTYPES) <= set(FAMILIES)
+
+
+def test_suggest_families_for_cv_filters_to_known_and_caps():
+    stub = _StubAnthropic(
+        lambda prompt: {
+            "families": ["engineering", "data_ml", "astronaut", "other", "product", "x"]
+        }
+    )
+    assert AnthropicRoleClassifier(client=stub).suggest_families("CV text") == [
+        "engineering",
+        "data_ml",
+        "product",
+    ]
+
+
+def test_suggest_families_failure_returns_empty():
+    def respond(prompt):
+        raise RuntimeError("api down")
+
+    assert AnthropicRoleClassifier(client=_StubAnthropic(respond)).suggest_families("CV") == []
+
+
+# --- /match/classify-roles ---
+
+
+def test_classify_roles_uses_llm_classifier_without_openai(client, session_factory):
+    from app.ai.embedder import get_embedder
+    from app.ai.role_family import FakeRoleClassifier, get_role_classifier
+    from app.main import app as fastapi_app
+
+    def no_openai():
+        raise AssertionError("the LLM path must not need the embedder")
+
+    with session_factory() as s:
+        s.add_all(
+            [
+                _job("eng", title="Backend Engineer"),
+                _job("legal", title="Corporate Paralegal"),
+                _job("done", title="Account Executive", role_family="sales"),
+            ]
+        )
+        s.commit()
+    fastapi_app.dependency_overrides[get_role_classifier] = lambda: FakeRoleClassifier()
+    fastapi_app.dependency_overrides[get_embedder] = no_openai
+
+    body = client.post("/match/classify-roles").json()
+    assert body["classified"] == 2  # only the unclassified rows
+    with session_factory() as s:
+        fams = {j.source_id: j.role_family for j in s.query(Job).all()}
+    assert fams == {"eng": "engineering", "legal": "legal", "done": "sales"}
 
 
 # --- filter ---
