@@ -35,6 +35,7 @@ class JobOut(BaseModel):
     role_family: str | None = None
     url: str
     posted_at: datetime | None
+    source_gone_at: datetime | None = None
     ingested_at: datetime
     # Pipeline status if this job is being tracked (set by list/shortlist routes).
     application_status: str | None = None

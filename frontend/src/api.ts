@@ -82,6 +82,11 @@ const realApi = {
   languages: () => req<{ code: string; count: number }[]>("/jobs/languages"),
   cities: () => req<{ name: string; count: number }[]>("/jobs/cities"),
   countries: () => req<{ name: string; count: number }[]>("/jobs/countries"),
+  jobDescription: (id: number) => req<{ description: string }>(`/jobs/${id}`),
+  existingJobs: (ids: number[]) =>
+    req<{ ids: number[] }>(
+      "/jobs/existing?" + new URLSearchParams(ids.map((id) => ["ids", String(id)])).toString(),
+    ),
 
   // ---- Preferences ----
   getPrefs: () => req<Preferences>("/preferences"),

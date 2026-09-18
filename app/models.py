@@ -88,12 +88,19 @@ class Job(Base):
     min_years_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Coarse seniority inferred from the title: 'intern' | 'senior' | None (mid/junior).
     seniority: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    # Coarse role family from the title, in embedding space (engineering | sales |
-    # support | ...), null when unclassifiable. See app/ai/role_family.py.
+    # Coarse role family from the title (engineering | sales | legal | ...), labelled by
+    # the LLM or the embedding fallback; null until classified. See app/ai/role_family.py.
     role_family: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     url: Mapped[str] = mapped_column(Text, nullable=False)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When the posting was last confirmed live: seen in its source feed, or a liveness
+    # check answered 2xx. Drives which aggregator listings the sweep re-checks.
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When a tracked posting was found gone from its source (dropped from the feed, or
+    # a 404/410). Tracked jobs are kept rather than deleted, so the stored fields are the
+    # last saved copy. Cleared if the posting shows up in the feed again.
+    source_gone_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Semantic embedding of the job (Phase 2). Null until embedded.
     embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType(EMBED_DIM), nullable=True)

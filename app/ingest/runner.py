@@ -12,6 +12,7 @@ so the runner is exercised by SQLite-backed tests without a live database.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import func, select
@@ -101,6 +102,9 @@ def _apply_fields(job: Job, cj: CanonicalJob) -> None:
     job.location = cj.location
     job.is_remote = cj.is_remote
     job.posted_at = cj.posted_at
+    # Present in the source feed right now = live; the liveness sweep skips it.
+    job.last_checked_at = datetime.now(UTC)
+    job.source_gone_at = None
     job.company_norm = normalize_company(cj.company)
     job.title_norm = normalize_title(cj.title)
     job.location_norm = normalize_location(cj.location)
@@ -178,8 +182,8 @@ def _sweep_stale(session: Session, source: str, fetched_ids: list[str], stats: I
     return HTTP 200 even for deleted postings, so a URL check can't tell). Scoped
     conservatively: only prunes within companies (source_id slug prefixes) that
     actually appeared in this fetch, so a company whose board failed or was skipped
-    is left untouched. Jobs with a tracked Application are never removed. Does
-    nothing on an empty fetch (a total failure must not wipe the corpus).
+    is left untouched. Jobs with a tracked Application are never removed, only marked
+    gone. Does nothing on an empty fetch (a total failure must not wipe the corpus).
     """
     fetched = set(fetched_ids)
     if not fetched:
@@ -188,7 +192,11 @@ def _sweep_stale(session: Session, source: str, fetched_ids: list[str], stats: I
     tracked = set(session.scalars(select(Application.job_id)))
     for job in session.scalars(select(Job).where(Job.source == source)):
         slug = job.source_id.split(":", 1)[0]
-        if slug not in seen_slugs or job.source_id in fetched or job.id in tracked:
+        if slug not in seen_slugs or job.source_id in fetched:
+            continue
+        if job.id in tracked:
+            if job.source_gone_at is None:
+                job.source_gone_at = datetime.now(UTC)
             continue
         session.delete(job)
         stats.removed_stale += 1

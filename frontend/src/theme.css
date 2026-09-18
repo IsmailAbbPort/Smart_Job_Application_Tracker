@@ -750,6 +750,12 @@ main {
   padding: 0 5px;
   white-space: nowrap;
 }
+.tag.expired {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: transparent;
+  cursor: default;
+}
 
 /* ---- Applications board ---- */
 .board {
@@ -850,6 +856,8 @@ main {
   flex-direction: column;
   min-width: 0;
   height: 100vh;
+  position: relative;
+  overflow: hidden;
 }
 .inspector.drawer {
   position: fixed;
@@ -865,6 +873,56 @@ main {
   padding: 24px;
   text-align: center;
   color: var(--faint);
+}
+.desc-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 0.22s;
+}
+.desc-panel.open {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s;
+}
+.desc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px 0 14px;
+}
+.desc-head h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.desc-note {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 20px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.desc-body {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 20px 32px;
+  white-space: pre-line;
+  line-height: 1.6;
+}
+@media (prefers-reduced-motion: reduce) {
+  .desc-panel,
+  .desc-panel.open {
+    transition: none;
+  }
 }
 .insp-head {
   padding: 16px 20px 14px;
@@ -988,23 +1046,6 @@ main {
   color: var(--muted);
   margin: 4px 0 12px;
 }
-.dims {
-  display: grid;
-  grid-template-columns: 1fr 110px 28px;
-  gap: 6px 10px;
-  align-items: center;
-}
-.dims .fitbar {
-  width: 100%;
-}
-.dims span:last-child {
-  text-align: right;
-}
-.dimhint {
-  color: var(--faint);
-  font-size: 12px;
-  margin-top: 8px;
-}
 .req {
   padding: 8px 0;
   border-top: 1px solid var(--line);
@@ -1017,8 +1058,24 @@ main {
   font-weight: 500;
   display: block;
 }
-.req span {
+.req > span {
   color: var(--muted);
+}
+.reqstatus {
+  display: inline-block;
+  min-width: 52px;
+  margin-right: 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.reqstatus.met {
+  color: var(--good);
+}
+.reqstatus.partial {
+  color: var(--warn);
+}
+.reqstatus.absent {
+  color: var(--bad);
 }
 .bullet {
   display: flex;
@@ -1293,6 +1350,11 @@ textarea.input {
 }
 .tooltip-arrow {
   fill: var(--text);
+}
+@media (hover: none) {
+  .tooltip-content.hover-only {
+    display: none;
+  }
 }
 .pill-row {
   display: flex;

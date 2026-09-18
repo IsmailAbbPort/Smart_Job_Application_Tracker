@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
 
 from app.ingest import runner
@@ -38,6 +40,13 @@ def test_insert_then_reingest_updates(session, monkeypatch):
     second = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
     assert (second.inserted, second.updated) == (0, 2)
     assert _count(session) == 2
+
+
+def test_ingest_stamps_jobs_seen_in_feed_as_checked(session, monkeypatch):
+    # Being in the source feed is proof of life, so the liveness sweep can skip it.
+    monkeypatch.setitem(runner.SOURCES, "fake", FakeSource("fake", [make_canonical("fake", "1")]))
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert session.scalar(select(Job)).last_checked_at is not None
 
 
 def test_full_catalog_source_sweeps_removed_jobs(session, monkeypatch):
@@ -110,6 +119,21 @@ def test_sweep_spares_tracked_jobs(session, monkeypatch):
     stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
     assert stats.removed_stale == 0  # tracked application is never pruned
     assert _count(session) == 2
+    assert job.source_gone_at is not None  # but it is marked expired
+
+
+def test_tracked_job_back_in_feed_clears_expired(session, monkeypatch):
+    monkeypatch.setitem(
+        runner.SOURCES, "fake", _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    )
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    job = session.scalar(select(Job).where(Job.source_id == "acme:1"))
+    session.add(Application(job_id=job.id, status="applied"))
+    job.source_gone_at = datetime.now(UTC)
+    session.commit()
+
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert job.source_gone_at is None
 
 
 def test_reingest_applies_field_changes(session, monkeypatch):

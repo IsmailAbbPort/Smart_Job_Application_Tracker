@@ -41,6 +41,14 @@ _COMPANY_SUFFIXES = {
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_BR_RE = re.compile(r"<br\s*/?>", flags=re.IGNORECASE)
+_LI_RE = re.compile(r"<li\b[^>]*>", flags=re.IGNORECASE)
+_BLOCK_RE = re.compile(
+    r"</?(?:p|div|h[1-6]|ul|ol|tr|table|section|article|blockquote|header|footer)\b[^>]*>",
+    flags=re.IGNORECASE,
+)
+_INLINE_WS_RE = re.compile(r"[^\S\n]+")
+_BLANK_LINES_RE = re.compile(r"\n{3,}")
 _PUNCT_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
 
@@ -95,18 +103,23 @@ def dedup_key(company: str | None, title: str | None, location: str | None) -> s
 
 
 def html_to_text(value: str | None) -> str:
-    """Unescape HTML entities, strip tags, collapse whitespace.
+    """Unescape HTML entities and strip tags, keeping paragraphs, line breaks and bullets.
 
     Greenhouse returns entity-escaped HTML (&lt;p&gt;...), Arbeitnow/Remotive return
     real HTML. Unescape first, then strip tags. Lever/Ashby already give plain text
-    and pass through unchanged.
+    and pass through unchanged. Block structure is kept because the description is
+    shown to the user; spaces within a line are still collapsed.
     """
     if not value:
         return ""
     # Unescape twice: Greenhouse double-encodes (&amp;lt; -> &lt; -> <).
     text = html.unescape(html.unescape(value))
+    text = _BR_RE.sub("\n", text)
+    text = _LI_RE.sub("\n• ", text)
+    text = _BLOCK_RE.sub("\n", text)
     text = _TAG_RE.sub(" ", text)
-    return _collapse(text)
+    lines = (_INLINE_WS_RE.sub(" ", line).strip() for line in text.split("\n"))
+    return _BLANK_LINES_RE.sub("\n\n", "\n".join(lines)).strip()
 
 
 def looks_remote(*fields: str | None) -> bool:

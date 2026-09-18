@@ -63,6 +63,11 @@ const TOUR_STEPS: TourStep[] = [
     body: "Everything you track lands on a board. Drag cards between stages, or add a job you found somewhere else.",
   },
   {
+    target: "applications",
+    title: "Expired postings stay saved",
+    body: "If a job you track is taken down from the site it was listed on, its card is marked Expired. Its details stay saved, and View description shows the last copy of the posting.",
+  },
+  {
     target: "views",
     title: "Save filter sets",
     body: "Save a set of filters from the Filters popup and it appears here, one click to apply.",
@@ -353,6 +358,7 @@ export default function App() {
           runToken={runToken}
           onCount={setShortlistCount}
           onSaveView={saveView}
+          suggestedRoles={selectedCv?.suggested_role_families ?? []}
           cvs={cvs}
           onSelectCv={setCvId}
           onUploadCv={() => setUploadOpen(true)}
@@ -392,6 +398,10 @@ export default function App() {
         onSaved={async (cv) => {
           await loadCvs();
           setCvId(String(cv.id));
+          // A new CV with no role filter set yet starts from its suggested roles.
+          const roles = cv.suggested_role_families ?? [];
+          if (roles.length && !filters.roleFamilies.length)
+            applyFilters({ ...filters, roleFamilies: roles });
         }}
       />
       <CvModal

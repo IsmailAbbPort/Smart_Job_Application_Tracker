@@ -79,6 +79,24 @@ def test_html_to_text_plain_html():
     assert html_to_text(None) == ""
 
 
+def test_html_to_text_keeps_paragraphs_and_bullets():
+    # The stored description is shown to the user, so block structure must survive.
+    raw = (
+        "<h3>About</h3><p>We build tools.</p>"
+        "<p>Line one<br>line two</p>"
+        "<ul><li>Python</li><li>SQL &amp; dbt</li></ul>"
+    )
+    assert html_to_text(raw) == (
+        "About\n\nWe build tools.\n\nLine one\nline two\n\n• Python\n• SQL & dbt"
+    )
+
+
+def test_html_to_text_collapses_spaces_within_lines():
+    assert html_to_text("<p>  lots \t of&nbsp; space  </p>\n\n\n\n<p>next</p>") == (
+        "lots of space\n\nnext"
+    )
+
+
 def test_looks_remote():
     assert looks_remote("Remote, Italy") is True
     assert looks_remote(None, "Fully Remote Engineer") is True
