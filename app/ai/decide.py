@@ -20,8 +20,10 @@ Rules (fixed before measuring, see evals/README.md):
 The must-haves that carry the score are the ones the model marked core, because a ratio
 over every listed line made the tier depend on how finely the model split the posting: a
 posting whose requirements came back as 21 product areas scored medium where the same
-posting split into 8 scored strong. Constraints that slipped in as requirements ("3+
-years", "can work in Germany") are dropped here too, since they are graded as constraints.
+posting split into 8 scored strong. Lines that slipped in as requirements but are nothing
+more than a constraint ("3+ years of experience", "can work in Germany") are dropped here
+too, since they are graded as constraints. A line that merely mentions one ("12+ years in
+ML with proven leadership at scale") is still graded, so the seniority ask still counts.
 """
 
 from __future__ import annotations
@@ -60,21 +62,68 @@ MIN_CORE = 3
 
 _CREDIT = {RequirementStatus.met: 1.0, RequirementStatus.partial: 0.5, RequirementStatus.absent: 0}
 
+# Spoken languages, listed so that "fluent in German" reads as a language constraint while
+# "fluent in Python" stays a skill.
+_SPOKEN = (
+    "english|german|french|spanish|italian|dutch|portuguese|polish|swedish|danish"
+    "|norwegian|finnish|arabic|hebrew|mandarin|chinese|japanese|korean|russian"
+    "|ukrainian|czech|slovak|romanian|hungarian|greek|turkish|bulgarian|croatian"
+)
+
 # Requirements that are really eligibility constraints. They are graded from
 # PostingConstraints, so counting them again as unmet skills double-penalizes the pair.
-# Kept deliberately narrow: these patterns must not swallow a real skill ("native mobile
-# development", "clear communication in a remote team") along with the constraint.
+# Each pattern swallows its own object ("right to work in the EU", not just "right to
+# work") so that removing it from a line leaves nothing but filler when the line was
+# nothing else, which is what `_is_only_a_constraint` tests for.
 _CONSTRAINT_RE = re.compile(
-    r"\d\s*\+?\s*years?\b"
-    r"|years? of (?:[a-z]+ )?experience"
-    r"|work permit|right to work|work authoriz|work visa|\bvisa\b|sponsorship"
-    r"|eligib(?:le|ility) to work|legally (?:work|able to work)"
+    r"\d+\s*(?:\+|-\s*\d+|to\s*\d+)?\s*years?(?:\s+of)?"
+    r"(?:\s+(?:professional|commercial|relevant|industry|hands[- ]on|practical))?"
+    r"(?:\s+experience)?"
+    r"|(?:several|many|multiple)?\s*years? of (?:[a-z]+ )?experience"
+    r"|(?:the\s+)?(?:legal\s+)?right to work(?:\s+in\s+[^.,;]*)?"
+    r"|work (?:permit|authoriz\w*|visa)(?:\s+(?:in|for)\s+[^.,;]*)?"
+    r"|(?:visa|work permit|immigration|relocation)\s+sponsorship"
+    r"|sponsorship\s+(?:is\s+)?(?:not\s+)?(?:available|provided|offered|required)"
+    r"|eligib\w+ to work(?:\s+in\s+[^.,;]*)?"
+    r"|legally (?:able to )?work(?:\s+in\s+[^.,;]*)?"
     r"|citizenship|security clearance"
-    r"|fluent in|native speaker|native[- ]level|language proficiency"
-    r"|based in|located in|residing in|relocat|time ?zone overlap|willing to travel"
+    r"|language proficiency|native speaker"
+    r"|(?:fluent|fluency|native|business[- ]level|professional)\s+(?:in\s+)?"
+    rf"(?:written and spoken\s+)?(?:{_SPOKEN})\b"
+    r"|(?:based|located|residing|resident)\s+in\s+[^.,;]*"
+    r"|relocat\w*(?:\s+to\s+[^.,;]*)?"
+    r"|time ?zone overlap|willing to travel"
     r"|fully remote|work remotely|remote[- ]first|work from (?:home|anywhere)",
     re.IGNORECASE,
 )
+
+# Words that carry no skill of their own, so what is left of a line after the constraint
+# phrase is removed can be checked for an actual requirement hiding in it.
+_FILLER = frozenset(
+    "a an and or the of in with at on for to be is are as you your we our this that "
+    "least minimum min plus over up can must have has should will would able "
+    "not no none available provided offered unfortunately "
+    "experience experienced working work professional relevant commercial industry "
+    "hands practical proven demonstrated strong solid deep track record "
+    "candidate candidates applicant applicants ideally preferably required requirement "
+    "role position job team company years year".split()
+)
+
+_WORD_RE = re.compile(r"[a-z]+")
+
+
+def _is_only_a_constraint(text: str) -> bool:
+    """True when the line is nothing but an eligibility or tenure constraint.
+
+    A constraint phrase buried in a wider requirement ("proven leadership at scale with
+    12+ years in ML", "Go language proficiency") leaves real words behind, so the line is
+    still graded as a skill. Dropping those was both losing skills and, worse, hiding the
+    seniority asks that should push a senior role down.
+    """
+    if not _CONSTRAINT_RE.search(text):
+        return False
+    rest = _CONSTRAINT_RE.sub(" ", text)
+    return not [w for w in _WORD_RE.findall(rest.lower()) if w not in _FILLER]
 
 
 @dataclass(frozen=True)
@@ -166,7 +215,7 @@ def decide(
 ) -> MatchVerdict:
     """Grade one pair's facts under the given rules. job_is_remote is the ingested remote
     flag, used only when the model could not tell the posting's work mode."""
-    skills = [r for r in facts.requirements if not _CONSTRAINT_RE.search(r.requirement)]
+    skills = [r for r in facts.requirements if not _is_only_a_constraint(r.requirement)]
     must = [r for r in skills if r.importance == Importance.must_have]
     nice = [r for r in skills if r.importance == Importance.nice_to_have]
     graded = [r for r in must if r.core]

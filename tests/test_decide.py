@@ -99,6 +99,40 @@ def test_a_real_skill_that_mentions_remote_work_is_still_graded():
     assert decide(_facts(reqs), CandidateRules()).verdict == "weak"
 
 
+def test_a_skill_that_merely_mentions_a_constraint_is_still_graded():
+    # These were all dropped as constraints, which silently raised the score: the first two
+    # are plain skills, and the last two are the seniority asks that should push a senior
+    # role down rather than vanish.
+    for text in (
+        "Go language proficiency",
+        "Provide mentorship and horizontal sponsorship across the organization",
+        "Proven leadership at scale with 12+ years in software/ML engineering",
+        "At least 2+ years in a technical leadership role",
+        "5+ years of Python experience",
+        "Fluent in Python and its data stack",
+    ):
+        reqs = [("must_have", "absent", text)] * 4
+        assert decide(_facts(reqs), CandidateRules()).verdict == "weak", text
+
+
+def test_a_line_that_is_only_a_constraint_is_still_dropped():
+    for text in (
+        "5+ years of professional experience",
+        "3 years experience",
+        "Several years of experience",
+        "You must have the legal right to work in the EU",
+        "Eligible to work in Canada",
+        "Fluent in German",
+        "Native speaker",
+        "Visa sponsorship is not available",
+        "Based in Berlin",
+        "Willing to travel",
+    ):
+        reqs = MUST_MET + [("must_have", "absent", text)]
+        v = decide(_facts(reqs), CandidateRules())
+        assert v.verdict == "strong" and v.gaps == [], text
+
+
 def test_nice_to_haves_never_lower_the_tier():
     reqs = MUST_MET + [("nice_to_have", "absent")] * 5
     v = decide(_facts(reqs), CandidateRules())
