@@ -192,24 +192,64 @@ def apply_labels(labels_path: Path, golden_path: Path) -> None:
     print(f"Applied {len(template['pairs'])} labels -> {golden_path} (status=draft)")
 
 
-def add_pairs(cv_id: int, count: int, golden_path: Path) -> None:
+# Aggregators carry the same role reposted per location, and one company can hold a whole
+# band of the ranking. Both would spend the labelling effort on duplicates and make the
+# metrics mostly a measure of one employer, so each is capped.
+_MAX_PER_COMPANY = 3
+_LOCATION_SUFFIX_RE = re.compile(r"\s*[-,(/|].*$")
+
+
+def _posting_key(job: Job) -> tuple[str, str]:
+    """A repost of one role under a different location collapses to the same key."""
+    title = _LOCATION_SUFFIX_RE.sub("", (job.title or "").lower()).strip()
+    return ((job.company or "").lower().strip(), title)
+
+
+def _distinct_postings(
+    candidates: list[tuple[int, Job]], taken: set[tuple[str, str]] | None = None
+) -> list[tuple[int, Job]]:
+    """Drop reposts of the same role and cap how much of the sample one company can be.
+
+    `taken` is the set of posting keys the golden set already holds, so a role already
+    labelled under another job id is not added a second time under a new location.
+    """
+    out: list[tuple[int, Job]] = []
+    keys: set[tuple[str, str]] = set(taken or ())
+    per_company: dict[str, int] = {}
+    for idx, job in candidates:
+        key = _posting_key(job)
+        company = key[0]
+        if key in keys or per_company.get(company, 0) >= _MAX_PER_COMPANY:
+            continue
+        keys.add(key)
+        per_company[company] = per_company.get(company, 0) + 1
+        out.append((idx, job))
+    return out
+
+
+def add_pairs(cv_id: int, count: int, golden_path: Path, rank_cv_id: int | None = None) -> None:
     """Append unlabeled pairs drawn from the pool the user actually browses.
 
     The original sample ran over the whole corpus, so only 8 of its 63 pairs are a real
     fit and every strong/medium number rests on a handful of pairs. These are drawn from
     the filtered shortlist instead (remote, not senior, an engineering or data/ML role),
     which is the only place a strong fit can be, so they skew positive on purpose. Most
-    come from the head of that ranking, with a mid band for contrast.
+    come from the head of that ranking, with a mid band for contrast, after reposts of the
+    same role and over-represented companies are dropped (see `_distinct_postings`).
 
     Leaves the set at status=draft-unlabeled, so `load_golden_set` refuses it until the
     new pairs are labelled and merged back with --apply-labels.
+
+    rank_cv_id ranks against a different corpus row than the cv_id written on the pairs,
+    for when the same CV has been re-uploaded under a new id (replacing a CV file makes a
+    new row) and the golden set still refers to the original.
     """
     data = json.loads(golden_path.read_text(encoding="utf-8"))
     seen = {pair["id"] for pair in data["pairs"]}
     with SessionLocal() as session:
-        cv = session.get(Cv, cv_id)
+        cv = session.get(Cv, rank_cv_id or cv_id)
         if cv is None or cv.embedding is None:
-            raise SystemExit(f"CV {cv_id} not found or not embedded")
+            raise SystemExit(f"CV {rank_cv_id or cv_id} not found or not embedded")
         ranked = rank_jobs(
             session,
             list(cv.embedding),
@@ -221,7 +261,17 @@ def add_pairs(cv_id: int, count: int, golden_path: Path) -> None:
             ],
             limit=1200,
         )
-        fresh = [(i, job) for i, (job, _sim) in enumerate(ranked) if f"j{job.id}" not in seen]
+        held = {
+            (
+                (pair["job"]["company"] or "").lower().strip(),
+                _LOCATION_SUFFIX_RE.sub("", (pair["job"]["title"] or "").lower()).strip(),
+            )
+            for pair in data["pairs"]
+        }
+        fresh = _distinct_postings(
+            [(i, job) for i, (job, _sim) in enumerate(ranked) if f"j{job.id}" not in seen],
+            taken=held,
+        )
         if not fresh:
             raise SystemExit("every job in the filtered pool is already in the golden set")
         head = fresh[: round(count * 0.7)]
@@ -315,11 +365,16 @@ def main() -> None:
         metavar="N",
         help="Append N unlabeled pairs from the filtered shortlist to the existing set",
     )
+    parser.add_argument(
+        "--rank-cv",
+        type=int,
+        help="Rank against this corpus CV row instead of --cv (same CV, re-uploaded id)",
+    )
     args = parser.parse_args()
 
     out = Path(args.out)
     if args.add_pairs:
-        add_pairs(args.cv, args.add_pairs, out)
+        add_pairs(args.cv, args.add_pairs, out, rank_cv_id=args.rank_cv)
     elif args.refresh_descriptions:
         refresh_descriptions(out)
     elif args.externalize_cvs:
