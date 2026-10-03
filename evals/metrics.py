@@ -187,6 +187,38 @@ def gwet_ac1(y_true: Sequence[str], y_pred: Sequence[str], labels: Sequence[str]
     return (observed - expected) / (1.0 - expected)
 
 
+def auroc(scores: Sequence[float], outcomes: Sequence[bool]) -> float:
+    """Area under the ROC curve: the chance a relevant pair outscores an irrelevant one.
+
+    Reported alongside ECE because it answers the question the score is actually used for.
+    ECE asks whether `overall_score / 100` is a truthful probability, which it was never
+    built to be (it is a weighted requirement ratio), so a poor ECE can mean nothing more
+    than a mis-scaled score. AUROC only asks whether the ordering is right, and it is
+    unchanged by any monotonic rescaling. 0.5 is coin-flip, 1.0 is a perfect separation.
+
+    Computed from the rank-sum identity rather than by sweeping thresholds, with tied
+    scores sharing their average rank so a block of equal scores counts as half a point
+    each. Returns 0.5 when either class is empty (nothing to separate).
+    """
+    pairs = sorted(zip(scores, outcomes, strict=True), key=lambda p: p[0])
+    n_pos = sum(1 for _, o in pairs if o)
+    n_neg = len(pairs) - n_pos
+    if not n_pos or not n_neg:
+        return 0.5
+    ranks = [0.0] * len(pairs)
+    i = 0
+    while i < len(pairs):
+        j = i
+        while j + 1 < len(pairs) and pairs[j + 1][0] == pairs[i][0]:
+            j += 1
+        shared = (i + j) / 2 + 1  # 1-based average rank of the tied block
+        for k in range(i, j + 1):
+            ranks[k] = shared
+        i = j + 1
+    rank_sum_pos = sum(r for r, (_, o) in zip(ranks, pairs, strict=True) if o)
+    return (rank_sum_pos - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
+
 def calibration_bins(
     probs: Sequence[float], outcomes: Sequence[bool], n_bins: int = 10
 ) -> list[dict]:

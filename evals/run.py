@@ -141,6 +141,7 @@ def evaluate_judge(
         "per_label": prf["per_label"],
         "macro": prf["macro"],
         "confusion": metrics.confusion_matrix(y_true, y_pred, TIERS),
+        "auroc": metrics.auroc(probs, outcomes),
         "ece": metrics.expected_calibration_error(probs, outcomes),
         "calibration_bins": metrics.calibration_bins(probs, outcomes),
     }
@@ -305,6 +306,7 @@ def _aggregate(per_cv: dict[int, dict], ks: list[int], stages: set[str]) -> dict
                 [c["judge"]["per_label"]["strong"]["precision"] for c in cvs]
             ),
             "macro_f1": metrics.mean([c["judge"]["macro"]["f1"] for c in cvs]),
+            "auroc": metrics.mean([c["judge"]["auroc"] for c in cvs]),
             "ece": metrics.mean([c["judge"]["ece"] for c in cvs]),
         }
     if "letter" in stages and cvs:
@@ -384,6 +386,7 @@ def _print_report(results: dict) -> None:
         print(f"  Gwet's AC1       {_fmt(j['ac1'])}")
         print(f"  strong recall    {_fmt(j['strong_recall'])}")
         print(f"  strong precision {_fmt(j['strong_precision'])}")
+        print(f"  AUROC            {_fmt(j['auroc'])}")
         print(f"  ECE              {_fmt(j['ece'])}")
         first = next(iter(results["per_cv"].values()), {})
         if "judge" in first:

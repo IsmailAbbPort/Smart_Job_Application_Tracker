@@ -123,6 +123,21 @@ def test_calibration_bins_and_ece():
     assert metrics.expected_calibration_error([], []) == 0.0
 
 
+def test_auroc_ranks_relevant_pairs_above_irrelevant_ones():
+    assert metrics.auroc([0.9, 0.8, 0.2, 0.1], [True, True, False, False]) == 1.0
+    assert metrics.auroc([0.9, 0.8, 0.2, 0.1], [False, False, True, True]) == 0.0
+    # Rescaling the scores cannot change the ordering, so AUROC is unmoved (unlike ECE).
+    assert metrics.auroc([0.45, 0.4, 0.1, 0.05], [True, True, False, False]) == 1.0
+    # One relevant pair below one irrelevant pair: 3 of 4 cross-class pairs correct.
+    assert metrics.auroc([0.9, 0.1, 0.5, 0.05], [True, True, False, False]) == 0.75
+    # Every score tied means no separation at all: each cross-class pair counts a half.
+    assert metrics.auroc([0.5] * 4, [True, True, False, False]) == 0.5
+    # A tied block straddling the classes: the two clear pairs plus half of the tie.
+    assert metrics.auroc([0.9, 0.5, 0.5, 0.1], [True, True, False, False]) == 0.875
+    assert metrics.auroc([0.9, 0.8], [True, True]) == 0.5  # no negatives to separate from
+    assert metrics.auroc([], []) == 0.5
+
+
 # --- Golden-set integrity ------------------------------------------------------
 
 
