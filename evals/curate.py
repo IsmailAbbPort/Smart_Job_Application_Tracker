@@ -3,6 +3,7 @@
     python -m evals.curate --cv 1                     # write an UNLABELED draft template
     python -m evals.curate --apply-labels _labels.json  # merge human/agent tier labels
     python -m evals.curate --refresh-descriptions       # re-read descriptions at the current cap
+    python -m evals.curate --add-pairs 30                # append pairs from the filtered shortlist
 
 Sampling is stratified over the cosine ranking so the set is not trivially separable:
 the truly-relevant jobs are NOT all at the top and the irrelevant ones are NOT all at
@@ -24,6 +25,8 @@ import json
 import random
 import re
 from pathlib import Path
+
+from sqlalchemy import or_
 
 from app.ai.matching import rank_jobs
 from app.db import SessionLocal
@@ -166,7 +169,10 @@ def apply_labels(labels_path: Path, golden_path: Path) -> None:
         pair.pop("_stratum", None)
         entry = labels.get(pair["id"])
         if entry is None:
-            missing.append(pair["id"])
+            # An already-labelled pair needs no entry, so a labels file can cover only the
+            # pairs just added by --add-pairs.
+            if pair.get("label_tier") is None:
+                missing.append(pair["id"])
             continue
         if isinstance(entry, str):
             pair["label_tier"] = entry
@@ -184,6 +190,63 @@ def apply_labels(labels_path: Path, golden_path: Path) -> None:
     GoldenSet.model_validate(template)  # fail loudly on a bad tier before writing
     golden_path.write_text(json.dumps(template, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"Applied {len(template['pairs'])} labels -> {golden_path} (status=draft)")
+
+
+def add_pairs(cv_id: int, count: int, golden_path: Path) -> None:
+    """Append unlabeled pairs drawn from the pool the user actually browses.
+
+    The original sample ran over the whole corpus, so only 8 of its 63 pairs are a real
+    fit and every strong/medium number rests on a handful of pairs. These are drawn from
+    the filtered shortlist instead (remote, not senior, an engineering or data/ML role),
+    which is the only place a strong fit can be, so they skew positive on purpose. Most
+    come from the head of that ranking, with a mid band for contrast.
+
+    Leaves the set at status=draft-unlabeled, so `load_golden_set` refuses it until the
+    new pairs are labelled and merged back with --apply-labels.
+    """
+    data = json.loads(golden_path.read_text(encoding="utf-8"))
+    seen = {pair["id"] for pair in data["pairs"]}
+    with SessionLocal() as session:
+        cv = session.get(Cv, cv_id)
+        if cv is None or cv.embedding is None:
+            raise SystemExit(f"CV {cv_id} not found or not embedded")
+        ranked = rank_jobs(
+            session,
+            list(cv.embedding),
+            filters=[
+                Job.is_remote.is_(True),
+                Job.source_gone_at.is_(None),
+                or_(Job.seniority.is_(None), Job.seniority != "senior"),
+                or_(Job.role_family.is_(None), Job.role_family.in_(("engineering", "data_ml"))),
+            ],
+            limit=1200,
+        )
+        fresh = [(i, job) for i, (job, _sim) in enumerate(ranked) if f"j{job.id}" not in seen]
+        if not fresh:
+            raise SystemExit("every job in the filtered pool is already in the golden set")
+        head = fresh[: round(count * 0.7)]
+        mid_start = len(fresh) // 3
+        mid = [p for p in fresh[mid_start:] if p not in head][: count - len(head)]
+        added = []
+        for idx, job in head + mid:
+            pair = _snapshot(job, cosine_rank=idx + 1)
+            pair["cv_id"] = cv_id
+            added.append(pair)
+        data["pairs"].extend(added)
+    data["status"] = "draft-unlabeled"
+    data["notes"] = (
+        f"{len(added)} pair(s) added from the filtered shortlist and NOT yet labelled. "
+        "Fill each new label_tier, then run: python -m evals.curate --apply-labels."
+    )
+    golden_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Added {len(added)} unlabeled pair(s) to {golden_path} (status=draft-unlabeled)")
+    for pair in added:
+        j = pair["job"]
+        print(
+            f"  {pair['id']:>7}  #{pair['cosine_rank']:<5} {(j['seniority'] or '-'):<7} "
+            f"{(j['role_family'] or '-'):<12} {len(j['description'] or ''):>6}c "
+            f"{(j['title'] or '')[:46]:<46} @ {(j['company'] or '')[:20]}"
+        )
 
 
 def refresh_descriptions(golden_path: Path) -> None:
@@ -246,10 +309,18 @@ def main() -> None:
         action="store_true",
         help="Re-read the pairs' job descriptions from the corpus at the current char cap",
     )
+    parser.add_argument(
+        "--add-pairs",
+        type=int,
+        metavar="N",
+        help="Append N unlabeled pairs from the filtered shortlist to the existing set",
+    )
     args = parser.parse_args()
 
     out = Path(args.out)
-    if args.refresh_descriptions:
+    if args.add_pairs:
+        add_pairs(args.cv, args.add_pairs, out)
+    elif args.refresh_descriptions:
         refresh_descriptions(out)
     elif args.externalize_cvs:
         externalize_cvs(out)
