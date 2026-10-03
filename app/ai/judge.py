@@ -35,11 +35,14 @@ from app.schemas import (
 JUDGE_MODEL = "claude-haiku-4-5-20251001"
 # Bump when the JudgeFacts schema or the extraction prompt changes, so cached facts from an
 # older extractor are not mixed into an eval run.
-FACTS_VERSION = 3
+FACTS_VERSION = 4
 _VERDICT_TOOL = "submit_match_facts"
 
 _MAX_CV_CHARS = 12000
-_MAX_JOB_CHARS = 6000
+# Long enough for the whole posting (corpus p99 is about 12k chars) plus the title and
+# location lines build_job_text prepends. At 6000 the cut landed mid-posting and the model
+# never saw the eligibility paragraph, which is exactly where the work-rights facts live.
+_MAX_JOB_CHARS = 15000
 
 _SYSTEM_PROMPT = (
     "You are an experienced technical recruiter reading ONE candidate CV against ONE job "

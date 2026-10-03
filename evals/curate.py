@@ -2,6 +2,7 @@
 
     python -m evals.curate --cv 1                     # write an UNLABELED draft template
     python -m evals.curate --apply-labels _labels.json  # merge human/agent tier labels
+    python -m evals.curate --refresh-descriptions       # re-read descriptions at the current cap
 
 Sampling is stratified over the cosine ranking so the set is not trivially separable:
 the truly-relevant jobs are NOT all at the top and the irrelevant ones are NOT all at
@@ -29,7 +30,10 @@ from app.db import SessionLocal
 from app.models import Cv, Job
 from evals.golden_set import CV_PLACEHOLDER, GOLDEN_SET_PATH, LOCAL_CVS_PATH, GoldenSet
 
-_MAX_DESC_CHARS = 6000
+# Postings run longer than this only in the tail (corpus p99 is about 12k chars), and the
+# cut used to land mid-posting: 22 of the 63 pairs in the v2 set were snapshotted at
+# exactly 6000 chars, losing the eligibility paragraph that decides several of them.
+_MAX_DESC_CHARS = 14000
 _SEED = 20260822  # fixed so re-running curate reproduces the same sample
 
 # Titles that overlap the AI/full-stack CV in embedding space but are usually a weak
@@ -182,6 +186,37 @@ def apply_labels(labels_path: Path, golden_path: Path) -> None:
     print(f"Applied {len(template['pairs'])} labels -> {golden_path} (status=draft)")
 
 
+def refresh_descriptions(golden_path: Path) -> None:
+    """Re-read each pair's job description from the corpus, at the current char cap.
+
+    The snapshot is the authoritative copy of a pair (the labels were written against it,
+    and the liveness sweep removes an aggregator job once its posting 404s), so this only
+    ever lengthens a description that an older, shorter cap had cut. A pair whose job has
+    since left the corpus keeps the text it has, and is reported as such.
+    """
+    data = json.loads(golden_path.read_text(encoding="utf-8"))
+    longer, same, gone = [], 0, []
+    with SessionLocal() as session:
+        for pair in data["pairs"]:
+            job = session.get(Job, int(pair["id"].lstrip("j")))
+            if job is None:
+                gone.append(pair["id"])
+                continue
+            fresh = (job.description or "")[:_MAX_DESC_CHARS]
+            old = pair["job"]["description"] or ""
+            if len(fresh) > len(old):
+                pair["job"]["description"] = fresh
+                longer.append((pair["id"], len(old), len(fresh)))
+            else:
+                same += 1
+    golden_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"Lengthened {len(longer)} description(s); {same} unchanged; {len(gone)} job(s) gone")
+    for pair_id, before, after in longer:
+        print(f"  {pair_id:>7}  {before} -> {after} chars")
+    if gone:
+        print(f"  no longer in the corpus, snapshot kept as-is: {', '.join(gone)}")
+
+
 def externalize_cvs(golden_path: Path) -> None:
     """Move CV text out of an already-built golden set into the gitignored local file,
     replacing the committed content with a placeholder. Safe to re-run (idempotent)."""
@@ -206,10 +241,17 @@ def main() -> None:
         action="store_true",
         help="Move CV text out of the golden set into the gitignored local file",
     )
+    parser.add_argument(
+        "--refresh-descriptions",
+        action="store_true",
+        help="Re-read the pairs' job descriptions from the corpus at the current char cap",
+    )
     args = parser.parse_args()
 
     out = Path(args.out)
-    if args.externalize_cvs:
+    if args.refresh_descriptions:
+        refresh_descriptions(out)
+    elif args.externalize_cvs:
         externalize_cvs(out)
     elif args.apply_labels:
         apply_labels(Path(args.apply_labels), out)
