@@ -21,7 +21,12 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.ai.cover_letter import AnthropicDrafter, Drafter, FakeDrafter
+from app.ai.cover_letter import (
+    LETTER_PROMPT_VERSION,
+    AnthropicDrafter,
+    Drafter,
+    FakeDrafter,
+)
 from app.ai.decide import CandidateRules, decide
 from app.ai.embedder import (
     Embedder,
@@ -170,7 +175,7 @@ def evaluate_letters(
     unsupported: list[int] = []
     qualities: list[LetterQuality] = []
     for pair in chosen:
-        key = f"{model}:{cv_id}:{pair.id}"
+        key = f"letter-v{LETTER_PROMPT_VERSION}:{model}:{cv_id}:{pair.id}"
         cached = None if refresh else cache.get(key)
         if cached is None:
             result = drafter.write(cv.content, build_job_text(pair.job))
@@ -182,7 +187,7 @@ def evaluate_letters(
 
         if quality_judge is not None:
             qmodel = getattr(quality_judge, "model", "unknown")
-            qkey = f"{qmodel}:{cv_id}:{pair.id}"
+            qkey = f"letter-v{LETTER_PROMPT_VERSION}:{qmodel}:{cv_id}:{pair.id}"
             qcached = None if refresh else quality_cache.get(qkey)
             if qcached is None:
                 score = quality_judge.score(build_job_text(pair.job), result.body)

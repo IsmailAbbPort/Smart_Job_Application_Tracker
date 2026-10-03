@@ -13,6 +13,13 @@ application. So the pipeline is grounded end to end:
 3. Revise (only if the check found unsupported claims): rewrite to remove or
    placeholder them, then re-audit. So the audit is a guardrail, not just a warning.
 
+Being *specific* is the other half. The draft prompt asks for a fixed shape (a hook only
+a reader of this posting could write, then one paragraph per requirement bridging it to a
+named CV project and its outcome) and shows examples of the target register, rather than
+listing cliches to avoid: a list of banned phrases puts those phrases in the context and
+makes them likelier, and the measured dimensions were specificity and relevance, which no
+prohibition adds.
+
 The CV is sent as a cached prefix so the repeated draft/audit/revise calls (and
 repeat letters for the same CV) don't re-pay for it. `AnthropicDrafter` runs in
 production; `FakeDrafter` keeps tests offline. `get_drafter` 503s without
@@ -36,10 +43,15 @@ from app.schemas import (
 )
 
 LETTER_MODEL = "claude-sonnet-4-6"
+# Bump when a drafting prompt changes, so an eval run re-drafts instead of scoring letters
+# cached from the old prompt (the same job FACTS_VERSION does for the judge).
+LETTER_PROMPT_VERSION = 2
 _CHECK_TOOL = "report_fabrication_check"
 
 _MAX_CV_CHARS = 12000
-_MAX_JOB_CHARS = 6000
+# The details worth opening a letter on (the product, the team's problem, the scale) are
+# usually in the "about the team" prose late in a posting, so the whole posting is sent.
+_MAX_JOB_CHARS = 15000
 # A grounded letter needs few placeholders; more than this means the fit is weak, so
 # the drafter is told to keep it short and honest rather than pad with placeholders.
 _MAX_PLACEHOLDERS = 3
@@ -54,12 +66,31 @@ _DRAFT_SYSTEM = (
     "'[NEEDS INPUT: quantified result for project X]' rather than fabricating it, and "
     f"use at most {_MAX_PLACEHOLDERS} placeholders - if the letter would need more, the "
     "fit is weak, so keep it short and say so honestly instead of padding. "
-    "Do not claim years of experience or proficiency levels beyond what the CV states. "
-    "Write in the first person, specific and genuine, in the candidate's own voice. "
-    "Avoid cover-letter cliches and generic AI filler (no 'I am writing to express my "
-    "keen interest', no 'I am confident that', no empty superlatives); prefer concrete, "
-    "plain sentences tied to real CV facts. 3-4 short paragraphs. Output only the letter "
-    "body (no header, address, or date)."
+    "Do not claim years of experience or proficiency levels beyond what the CV states.\n\n"
+    "Follow this structure, which is what keeps a letter from reading like every other "
+    "one:\n"
+    "1. Open on something only someone who read THIS posting could write: the product, "
+    "the team's stated problem, the stack, the scale they operate at. Pair it with the "
+    "one fact from the CV that speaks to it. Do not state enthusiasm or an intent to "
+    "apply; the letter is the application.\n"
+    "2. Two middle paragraphs. Each takes ONE requirement from the posting and bridges "
+    "it to a named thing in the CV: the project, employer or tool by name, what was "
+    "built, and the outcome the CV records. One requirement per paragraph, the two that "
+    "matter most for this role.\n"
+    "3. Close in one or two sentences on what the candidate wants to work on here.\n\n"
+    "Every paragraph must name at least one particular: a project, an employer, a tool, "
+    "a number, or a detail from the posting. A sentence that could be pasted unchanged "
+    "into an application for a different job is filler, so cut it or make it specific.\n"
+    "Write in the first person, plain and declarative, in the candidate's own voice. "
+    "These show the register and the level of detail to aim for (they are about other "
+    "people, so take nothing factual from them):\n"
+    "- 'I built the ingest pipeline at Kalea that pulls about 4,000 listings a night and "
+    "dedupes them on a content hash.'\n"
+    "- 'You need pgvector for semantic search; I moved Orbit's job search onto it from a "
+    "LIKE query and cut p95 from 1.2s to 180ms.'\n"
+    "- 'I have not run Kafka in production. The at-least-once handling you describe is "
+    "what I wrote the retry queue in Meridian's payments worker for.'\n"
+    "3 to 4 short paragraphs. Output only the letter body (no header, address, or date)."
 )
 _CHECK_SYSTEM = (
     "You are a fabrication auditor for a cover letter the candidate is about to send. "
