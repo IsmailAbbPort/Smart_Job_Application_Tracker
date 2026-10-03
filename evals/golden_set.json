@@ -1126,8 +1126,8 @@
     {
       "id": "j8715",
       "cv_id": 1,
-      "label_tier": "weak",
-      "rationale": "The skills fit well (any modern backend language, production Node/Express APIs, ownership, AI tooling), but the only location the posting states is the United Kingdom, where EU work rights do not apply; the title's EMEA is not backed by any country list in the text. Labelled from what the posting says, so a judge that reads the stated country is not punished. Evidence: Remote, United Kingdom; Intermediate Backend Engineer, EMEA; Experience with Ruby/Rails, Go, or any other modern backend language",
+      "label_tier": "strong",
+      "rationale": "Checked against the live posting: the role is scoped to the UK or Poland (the application form asks which), and Poland is an EU route, so the stated 'Remote, United Kingdom' is not the whole restriction. Skills line up (any modern backend language, production Node/Express APIs, feature ownership, remote async writing, AI tooling) at intermediate level. NOTE: the ingested copy is cut at 6000 chars and 'Country Hiring Guidelines' starts at char 6004, so the judge cannot read the eligibility text; this pair is a known input-truncation miss, not a grading miss. Evidence: Country Hiring Guidelines: GitLab hires new team members in countries around the world; Are you located in the UK or Poland?; Experience with Ruby/Rails, Go, or any other modern backend language",
       "reviewed": true,
       "cosine_rank": 149,
       "split": "tune",
