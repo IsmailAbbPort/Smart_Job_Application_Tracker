@@ -8,7 +8,12 @@ A posting's hiring countries were only readable by the LLM judge, one paid call 
 after the job had already reached the shortlist. job.work_countries records what the text
 states at ingest, and work_rights is the user's side, so the shortlist can drop a job that
 hires only where the user cannot work. Both default to empty, which means unstated and
-keeps the job, so existing rows change nothing until the backfill runs.
+keeps the job, so existing rows change nothing until they are re-derived.
+
+Existing rows need `backfill_enrichment(force=True)` (or POST /ingest/backfill?force=true):
+the ordinary backfill only visits rows with no detected language, which an already-enriched
+corpus has none of, so without force every old row keeps an empty work_countries and the
+filter falls back to the weaker location-only rule for them.
 """
 
 from collections.abc import Sequence

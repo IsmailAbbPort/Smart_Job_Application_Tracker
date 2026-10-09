@@ -116,6 +116,21 @@ _SCOPE_IS_LOCATION = re.compile(
     r"only available for remote work within the specified country", re.IGNORECASE
 )
 
+# A negated sentence states the opposite of a scope ("we are not able to hire in the US",
+# "this role is not open to candidates based in the United States"), and reading it as an
+# allowlist would hide every job the posting actually is open to. Any negation in the
+# sentence drops it: losing a real restriction only lets noise through, while misreading
+# one hides a job the user should have seen.
+_SCOPE_NEGATION = re.compile(
+    r"\b(?:not|cannot|can ?not|unable|aren't|isn't|won't|doesn't|don't|"
+    r"no longer|except|other than|outside|rather than|instead of)\b|n't\b",
+    re.IGNORECASE,
+)
+
+# "U.S." would otherwise be split mid-abbreviation by the sentence splitter below, which
+# also made the dotted aliases unreachable from here.
+_DOTTED_ALIASES = ((r"\bU\.S\.A\.", "USA"), (r"\bU\.S\.", "US"), (r"\bU\.K\.", "UK"))
+
 _SENTENCE_SPLIT_RE = re.compile(r"[.;\n!?]+")
 
 
@@ -133,8 +148,12 @@ def extract_work_countries(text: str | None, location_codes: list[str] | None = 
     """
     if not text:
         return []
+    for pattern, replacement in _DOTTED_ALIASES:
+        text = re.sub(pattern, replacement, text)
     found: set[str] = set()
     for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if _SCOPE_NEGATION.search(sentence):
+            continue
         if _SCOPE_IS_LOCATION.search(sentence):
             found.update(location_codes or ())
             continue

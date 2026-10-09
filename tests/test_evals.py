@@ -282,3 +282,24 @@ def test_prefilter_never_hides_a_pair_the_user_called_a_fit():
     assert pre["excluded_relevant"] == 0, pre["excluded_relevant_ids"]
     # Every exclusion carries a human-readable reason, which is what the UI would show.
     assert all(reason for reason in pre["reasons"].values())
+
+
+def test_repost_collapsing_keeps_a_hyphenated_title_intact():
+    """A compound word in a title is not a location suffix.
+
+    Truncating at the first hyphen made "Full-Stack Engineer" and "Full-Time Platform
+    Engineer" share the key "full", so one was silently dropped as a repost of the other.
+    """
+    from app.models import Job
+    from evals.curate import _posting_key
+
+    def key(title):
+        return _posting_key(Job(company="Acme", title=title))[1]
+
+    assert key("Full-Stack Engineer") == "full-stack engineer"
+    assert key("Full-Time Platform Engineer") == "full-time platform engineer"
+    assert key("Full-Stack Engineer") != key("Full-Time Platform Engineer")
+    # A spaced hyphen, a comma or a pipe still marks a per-location repost.
+    assert key("Backend Engineer - Sweden") == "backend engineer"
+    assert key("Intermediate Backend Engineer, EMEA") == "intermediate backend engineer"
+    assert key("Software Engineer | Ireland | Remote") == "software engineer"

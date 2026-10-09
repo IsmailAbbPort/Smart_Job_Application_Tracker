@@ -196,7 +196,11 @@ def apply_labels(labels_path: Path, golden_path: Path) -> None:
 # band of the ranking. Both would spend the labelling effort on duplicates and make the
 # metrics mostly a measure of one employer, so each is capped.
 _MAX_PER_COMPANY = 3
-_LOCATION_SUFFIX_RE = re.compile(r"\s*[-,(/|].*$")
+# Trailing qualifiers a repost differs by ("Engineer, EMEA", "Engineer | Ireland |
+# Remote", "Engineer - Sweden"). A hyphen only counts when it is spaced, so a compound
+# word keeps its tail: at the first hyphen, "Full-Stack Engineer" and "Full-Time Platform
+# Engineer" both collapsed to "full" and were treated as reposts of each other.
+_LOCATION_SUFFIX_RE = re.compile(r"\s*[,(/|].*$|\s+-\s+.*$")
 
 
 def _posting_key(job: Job) -> tuple[str, str]:

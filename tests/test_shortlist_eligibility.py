@@ -81,3 +81,12 @@ def test_search_preferences_works_as_the_rules_object_too():
         work_rights = ["EU"]
 
     assert eligibility_block(_job(language="fr"), Prefs()) == "written in fr"
+
+
+def test_the_block_reason_shows_the_postings_own_codes():
+    # "EU" must read as "EU", not as a list of all 30 member states.
+    class Rules:
+        known_languages = []
+        work_rights = ["US"]
+
+    assert eligibility_block(_job(work_countries=["EU"]), Rules()) == "hires only in EU"

@@ -60,7 +60,11 @@ def eligibility_block(job: Job, rules) -> str | None:
         return None
     stated = expand_countries(job.work_countries or [])
     if stated:
-        return None if stated & rights else f"hires only in {', '.join(sorted(stated))}"
+        if stated & rights:
+            return None
+        # The posting's own codes, not the expanded set, so "EU" reads as "EU" rather
+        # than as all 30 member states.
+        return f"hires only in {', '.join(sorted(job.work_countries))}"
     located = expand_countries(resolve_country_codes(job.location))
     if not located or located & rights:
         return None

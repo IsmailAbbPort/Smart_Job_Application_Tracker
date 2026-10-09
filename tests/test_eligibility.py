@@ -167,6 +167,31 @@ def test_extract_work_countries_ignores_a_country_that_is_not_a_restriction():
     assert extract_work_countries("") == []
 
 
+def test_a_negated_scope_is_not_read_as_an_allowlist():
+    # The worst failure mode available: "we cannot hire in the US" read as "only the US"
+    # would hide every job the posting is actually open to.
+    for text in (
+        "We are not able to hire in the US.",
+        "This role is not open to candidates based in the United States.",
+        "We cannot hire candidates located in Germany.",
+        "Unfortunately we are unable to hire candidates based in France.",
+    ):
+        assert extract_work_countries(text) == [], text
+
+
+def test_a_dotted_abbreviation_is_not_split_mid_sentence():
+    assert extract_work_countries("Must be located in the U.S.") == ["US"]
+    assert extract_work_countries("Candidates must be based in the U.K.") == ["GB"]
+
+
+def test_a_place_that_merely_contains_a_country_name_is_not_a_restriction():
+    # "Atlanta, Georgia" is a US city, "New South Wales" is Australian, and "Jersey City"
+    # is in New Jersey. Reading any of them as its namesake country hides the wrong jobs.
+    assert extract_work_countries("Must be based in Atlanta, Georgia") == []
+    assert extract_work_countries("Candidates must be located in Jersey City") == []
+    assert extract_work_countries("Must be based in New South Wales") == ["AU"]
+
+
 def test_greenhouse_boilerplate_restriction_falls_back_to_the_location():
     # The sentence names no country; the posting's own location is the restriction.
     text = (

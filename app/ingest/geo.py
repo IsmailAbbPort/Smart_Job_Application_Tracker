@@ -132,8 +132,19 @@ _COUNTRY_BY_NAME.update(
         "the netherlands": "NL",
         "holland": "NL",
         "republic of ireland": "IE",
+        # Longest-first matching below means this wins over the bare "wales", so
+        # "New South Wales" resolves to Australia rather than the United Kingdom.
+        "new south wales": "AU",
     }
 )
+
+# Country names that are more often something else inside a sentence: US states and
+# cities ("Atlanta, Georgia", "Jersey City") and given names ("Jordan"). Excluded from
+# free-text matching only; a whole location segment still resolves them, because there
+# `_segment_codes` requires the segment to BE the country name. Dropping them loses the
+# rare posting restricted to Georgia the country, which is the safe direction: a wrong
+# country hides a job.
+_AMBIGUOUS_IN_TEXT = {"georgia", "jersey", "jordan", "chad", "mali", "niger", "guinea"}
 
 # Short forms that must only match in upper case, so the pronoun "us" in "join us in
 # Berlin" is never read as the United States.
@@ -157,7 +168,7 @@ _MENTION_RE = re.compile(
     + "|".join(
         re.escape(name)
         for name in sorted(_COUNTRY_BY_NAME, key=len, reverse=True)
-        if name.upper() not in _CASED_ALIASES and len(name) > 3
+        if name.upper() not in _CASED_ALIASES and len(name) > 3 and name not in _AMBIGUOUS_IN_TEXT
     )
     + r")\b"
 )
