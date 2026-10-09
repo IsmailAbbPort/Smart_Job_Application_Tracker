@@ -47,13 +47,19 @@ class AshbySource:
     name = NAME
     ttl_seconds = TTL_SECONDS
     full_catalog = True
+    fetched_slugs: frozenset[str] | set[str] = frozenset()
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []
+        answered: set[str] = set()
         for target in active_targets(session, NAME):
             resp = client.get(_BASE.format(slug=target.slug))
             if resp.status_code != 200:
                 continue
+            # Recorded even when the board is empty: that is a board with nothing left
+            # to offer, not a board we failed to reach, and the sweep must tell them apart.
+            answered.add(target.slug)
             out.extend(parse(resp.json(), slug=target.slug, company=target.company))
             time.sleep(_POLITE_DELAY)
+        self.fetched_slugs = answered
         return out

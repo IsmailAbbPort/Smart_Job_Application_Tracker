@@ -256,3 +256,59 @@ def test_manual_job_does_not_dedup_away_real_posting(session, monkeypatch):
     # A user's private manual job must not keep the real posting out of the corpus.
     assert stats.inserted == 1 and stats.deduped == 0
     assert _count(session) == 2
+
+
+def test_sweep_prunes_a_board_that_answered_with_nothing(session, monkeypatch):
+    """An emptied board is swept; an unreachable one is still spared.
+
+    A board answering 200 with zero jobs is indistinguishable, from the returned jobs
+    alone, from one that was never reached, so its stored jobs used to be skipped
+    forever: 175 Remote.com postings stayed live for a month after the company emptied
+    its Greenhouse board. The adapter now reports which boards answered.
+    """
+    src = _catalog_source(
+        "fake", [make_canonical(source_id="acme:1"), make_canonical(source_id="beta:1")]
+    )
+    src.fetched_slugs = {"acme", "beta"}
+    monkeypatch.setitem(runner.SOURCES, "fake", src)
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert _count(session) == 2
+
+    # beta answers, with an empty catalogue: its job is gone for real.
+    emptied = _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    emptied.fetched_slugs = {"acme", "beta"}
+    monkeypatch.setitem(runner.SOURCES, "fake", emptied)
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 1
+    assert _count(session) == 1
+
+
+def test_sweep_still_spares_a_board_that_did_not_answer(session, monkeypatch):
+    src = _catalog_source(
+        "fake", [make_canonical(source_id="acme:1"), make_canonical(source_id="beta:1")]
+    )
+    src.fetched_slugs = {"acme", "beta"}
+    monkeypatch.setitem(runner.SOURCES, "fake", src)
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+
+    # beta's board failed, so it is not in the answered set and must be left alone.
+    failed = _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    failed.fetched_slugs = {"acme"}
+    monkeypatch.setitem(runner.SOURCES, "fake", failed)
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 0
+    assert _count(session) == 2
+
+
+def test_sweep_does_nothing_when_no_board_answered(session, monkeypatch):
+    src = _catalog_source("fake", [make_canonical(source_id="acme:1")])
+    src.fetched_slugs = {"acme"}
+    monkeypatch.setitem(runner.SOURCES, "fake", src)
+    runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+
+    dead = _catalog_source("fake", [])
+    dead.fetched_slugs = set()  # every board failed: a total outage must not wipe anything
+    monkeypatch.setitem(runner.SOURCES, "fake", dead)
+    stats = runner.ingest_source(session, "fake", force=True, client=_DUMMY_CLIENT)
+    assert stats.removed_stale == 0
+    assert _count(session) == 1

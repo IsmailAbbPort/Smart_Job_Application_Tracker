@@ -42,5 +42,11 @@ class Source(Protocol):
     # can be swept. False for aggregators that return a rolling recent-jobs window
     # (Arbeitnow/Remotive), where an absent job may just be older, not removed.
     full_catalog: bool
+    # Set by a multi-company full-catalogue adapter to the company slugs whose board
+    # answered in the last fetch. The stale sweep needs this because a board that
+    # answers 200 with an empty list looks identical, from the returned jobs alone, to
+    # one that was never reached: in the first case its stored jobs are gone and must be
+    # swept, in the second they must be left alone. Empty for single-feed sources.
+    fetched_slugs: frozenset[str] | set[str]
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]: ...

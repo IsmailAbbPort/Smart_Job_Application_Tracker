@@ -182,20 +182,38 @@ def _persist(session: Session, source: str, jobs: list[CanonicalJob], stats: Ing
         stats.inserted += 1
 
 
-def _sweep_stale(session: Session, source: str, fetched_ids: list[str], stats: IngestStats) -> None:
+def _sweep_stale(
+    session: Session,
+    source: str,
+    fetched_ids: list[str],
+    stats: IngestStats,
+    answered_slugs: frozenset[str] | set[str] | None = None,
+) -> None:
     """Delete stored jobs of a full-catalogue source that vanished from its feed.
 
     Reliable removal for ATS boards (which serve a complete per-company list, and
     return HTTP 200 even for deleted postings, so a URL check can't tell). Scoped
     conservatively: only prunes within companies (source_id slug prefixes) that
-    actually appeared in this fetch, so a company whose board failed or was skipped
+    actually answered in this fetch, so a company whose board failed or was skipped
     is left untouched. Jobs with a tracked Application are never removed, only marked
-    gone. Does nothing on an empty fetch (a total failure must not wipe the corpus).
+    gone.
+
+    `answered_slugs` is the set of boards that returned 200, which the adapter reports.
+    Without it the scope had to be inferred from the jobs that came back, and a board
+    answering 200 with an empty list was then indistinguishable from one that was never
+    reached: its stored jobs were skipped forever. That is how 175 Remote.com postings
+    stayed in the corpus for a month after the company emptied its board. An empty
+    answered set still sweeps nothing, so a total failure cannot wipe the corpus.
     """
     fetched = set(fetched_ids)
-    if not fetched:
+    if answered_slugs is None:
+        if not fetched:
+            return
+        seen_slugs: set[str] = {sid.split(":", 1)[0] for sid in fetched}
+    else:
+        seen_slugs = set(answered_slugs)
+    if not seen_slugs:
         return
-    seen_slugs = {sid.split(":", 1)[0] for sid in fetched}
     tracked = set(session.scalars(select(Application.job_id)))
     for job in session.scalars(select(Job).where(Job.source == source)):
         slug = job.source_id.split(":", 1)[0]
@@ -236,7 +254,13 @@ def ingest_source(
         _persist(session, name, jobs, stats)
         # For full-catalogue sources, remove postings that dropped out of the feed.
         if getattr(source, "full_catalog", False):
-            _sweep_stale(session, name, [cj.source_id for cj in jobs], stats)
+            _sweep_stale(
+                session,
+                name,
+                [cj.source_id for cj in jobs],
+                stats,
+                answered_slugs=getattr(source, "fetched_slugs", None) or None,
+            )
         cache.record_fetch(session, name, status="ok", count=len(jobs))
         session.commit()
     except Exception as exc:  # noqa: BLE001 - surface any source failure as stats

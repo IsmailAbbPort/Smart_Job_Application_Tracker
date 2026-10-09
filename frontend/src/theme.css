@@ -796,7 +796,9 @@ main {
   font-weight: 400;
 }
 .col-body {
-  padding: 0 8px 8px;
+  /* 2px of top padding so the selected card's outer ring is not clipped by this
+     scroll container (the ring sits 1px outside the card's border). */
+  padding: 2px 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;

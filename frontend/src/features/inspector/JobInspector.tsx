@@ -420,6 +420,15 @@ export function JobInspector({
             )}
           </button>
         )}
+        {job.application_status && (
+          <button
+            className="btn danger"
+            title="Stop tracking this job"
+            onClick={() => onStatus(job.id, "")}
+          >
+            Remove
+          </button>
+        )}
       </div>
 
       <div className="insp-body scroll-themed">
