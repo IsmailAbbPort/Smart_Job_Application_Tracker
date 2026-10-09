@@ -54,6 +54,10 @@ class GoldenJob(BaseModel):
     required_languages: list[str] = Field(default_factory=list)
     min_years_experience: int | None = None
     url: str = ""
+    # Set by the pre-filter stage from the snapshot's own text, not stored in the file,
+    # so the eval exercises the live extractors rather than a frozen copy of their output.
+    language: str | None = None
+    work_countries: list[str] = Field(default_factory=list)
 
 
 class GoldenPair(BaseModel):
@@ -91,6 +95,7 @@ class GoldenRules(BaseModel):
 
     remote_only: bool = False
     known_languages: list[str] = Field(default_factory=list)
+    work_rights: list[str] = Field(default_factory=list)
     years_experience: int | None = None
     max_experience_gap: int | None = None
 

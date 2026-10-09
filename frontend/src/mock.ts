@@ -367,6 +367,7 @@ export const mockApi: Api = {
     years_experience: 3,
     user_utc_offset: 2,
     known_languages: ["en", "ar", "uk"],
+    work_rights: ["eu", "ua"],
   }),
   putPrefs: async (p) => p,
 

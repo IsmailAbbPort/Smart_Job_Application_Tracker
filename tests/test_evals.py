@@ -255,6 +255,30 @@ def test_pipeline_runs_over_committed_golden_set_offline():
         letter_cache=JsonCache(None),
     )
     agg = results["aggregate"]
-    assert set(agg) == {"matcher", "judge", "letter"}
+    assert set(agg) == {"matcher", "prefilter", "judge", "letter"}
     assert 0.0 <= agg["judge"]["ece"] <= 1.0
     assert results["golden"]["n_pairs"] == len(golden.pairs)
+
+
+def test_prefilter_never_hides_a_pair_the_user_called_a_fit():
+    """The pre-filter's precision guarantee, as a test.
+
+    The deterministic gate hides jobs without a model call, so a false exclusion is a job
+    the user never sees. Any new pattern that hides a strong or medium golden pair fails
+    here rather than in production. Noise removal is reported, not asserted: it will drift
+    as the set grows, and it is the safe direction to drift in.
+    """
+    golden = load_golden_set()
+    results = run_eval(
+        golden,
+        embedder=FakeEmbedder(),
+        judge=FakeJudge(),
+        drafter=FakeDrafter(),
+        stages=("prefilter",),
+        judge_cache=JsonCache(None),
+        letter_cache=JsonCache(None),
+    )
+    pre = results["per_cv"][1]["prefilter"]
+    assert pre["excluded_relevant"] == 0, pre["excluded_relevant_ids"]
+    # Every exclusion carries a human-readable reason, which is what the UI would show.
+    assert all(reason for reason in pre["reasons"].values())

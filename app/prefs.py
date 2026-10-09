@@ -31,6 +31,7 @@ def get_preferences(session: Session, owner_id: int | None = None) -> SearchPref
             exclude_countries=[],
             exclude_cities=[],
             known_languages=[],
+            work_rights=[],
             max_age_days=None,
             require_sponsorship=False,
             exclude_remote_regions=[],

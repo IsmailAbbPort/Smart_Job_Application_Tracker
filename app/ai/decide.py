@@ -132,6 +132,7 @@ class CandidateRules:
 
     remote_only: bool = False
     known_languages: list[str] = field(default_factory=list)
+    work_rights: list[str] = field(default_factory=list)
     years_experience: int | None = None
     max_experience_gap: int | None = None
 
@@ -145,6 +146,7 @@ def rules_from_preferences(prefs) -> CandidateRules:
     return CandidateRules(
         remote_only=bool(prefs.remote_only) or remote is True,
         known_languages=list(prefs.known_languages or []),
+        work_rights=list(getattr(prefs, "work_rights", None) or []),
         years_experience=prefs.years_experience,
         max_experience_gap=gap if gap is not None else prefs.max_experience_gap,
     )
@@ -162,7 +164,12 @@ def verdict_from_facts(
         return None
 
 
-def _countries(codes: list[str]) -> set[str]:
+def expand_countries(codes: list[str]) -> set[str]:
+    """Country codes as a comparable set, with EU/EEA expanded to the member states.
+
+    Shared with the shortlist pre-filter (app/shortlist.py) so the cheap filter and the
+    judge cannot disagree about which countries the user may work in.
+    """
     out: set[str] = set()
     for code in codes:
         code = code.strip().upper()
@@ -176,8 +183,10 @@ def _dealbreakers(
     c = facts.constraints
     out: list[str] = []
     where = f" ({c.location})" if c.location else ""
-    role_countries = _countries(c.work_countries)
-    rights = _countries(c.candidate_work_rights)
+    role_countries = expand_countries(c.work_countries)
+    # The user's stored rights win over what the CV happens to state, so the judge and the
+    # shortlist pre-filter grade against the same set.
+    rights = expand_countries(rules.work_rights or c.candidate_work_rights)
     if role_countries and rights and not role_countries & rights:
         out.append(f"No right to work where the role requires{where}")
     if c.citizenship_or_clearance and c.citizenship_or_clearance_ok == Tristate.no:

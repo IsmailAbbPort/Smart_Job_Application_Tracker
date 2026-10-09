@@ -42,6 +42,7 @@ function filterChips(f: FilterState): [string, string][] {
   if (f.cities.length) chips.push(["Cities", list(f.cities)]);
   if (f.language) chips.push(["Posting language", languageName(f.language)]);
   if (f.knownLangs.length) chips.push(["Languages", list(f.knownLangs.map(languageName))]);
+  if (f.workRights.length) chips.push(["Work rights", list(f.workRights).toUpperCase()]);
   if (f.tzOffset != null) chips.push(["Time zone", tzLabel(f.tzOffset).split(" ")[0]]);
   if (f.minSalary.trim())
     chips.push([

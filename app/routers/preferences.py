@@ -44,6 +44,7 @@ def update_preferences(
             field
             in (
                 "known_languages",
+                "work_rights",
                 "exclude_remote_regions",
                 "exclude_seniorities",
                 "exclude_title_keywords",

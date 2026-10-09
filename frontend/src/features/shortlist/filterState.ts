@@ -14,6 +14,7 @@ export interface FilterState {
   // Language & timezone (advanced)
   language: string; // ISO code, single
   knownLangs: string[]; // ISO codes, multi
+  workRights: string[]; // ISO2 country codes (or "eu"), multi
   tzOffset: number | null;
   // Compensation & experience (advanced)
   minSalary: string;
@@ -41,6 +42,7 @@ export const defaultFilters: FilterState = {
   region: "",
   language: "",
   knownLangs: [],
+  workRights: [],
   tzOffset: null,
   minSalary: "",
   currency: "",
@@ -64,6 +66,7 @@ export function advancedCount(f: FilterState): number {
   if (f.region) n++;
   if (f.language) n++;
   if (f.knownLangs.length) n++;
+  if (f.workRights.length) n++;
   if (f.minSalary.trim()) n++;
   if (f.yearsExp.trim()) n++;
   if (f.maxGap.trim()) n++;
@@ -149,6 +152,7 @@ export function filtersToPrefs(f: FilterState): Preferences {
     years_experience: f.yearsExp.trim() === "" ? null : Number(f.yearsExp),
     user_utc_offset: f.tzOffset,
     known_languages: f.knownLangs,
+    work_rights: f.workRights,
     exclude_title_keywords: f.exclTitles,
     include_role_families: f.roleFamilies,
     exclude_seniorities: sen,

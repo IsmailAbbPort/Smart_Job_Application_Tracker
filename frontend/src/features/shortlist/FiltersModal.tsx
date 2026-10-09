@@ -10,6 +10,7 @@ import {
   REGIONS,
   ROLE_FAMILIES,
   TIMEZONES,
+  WORK_RIGHTS_OPTIONS,
   languageName,
   tzLabel,
 } from "../../constants";
@@ -193,6 +194,19 @@ export function FiltersModal({
               onChange={(o) =>
                 set(
                   "knownLangs",
+                  (o as Option[]).map((x) => x.value),
+                )
+              }
+            />
+            <Select
+              label="Where you can legally work"
+              isMulti
+              options={WORK_RIGHTS_OPTIONS}
+              value={multi(WORK_RIGHTS_OPTIONS, f.workRights)}
+              placeholder="Anywhere"
+              onChange={(o) =>
+                set(
+                  "workRights",
                   (o as Option[]).map((x) => x.value),
                 )
               }

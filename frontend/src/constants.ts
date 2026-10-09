@@ -128,6 +128,22 @@ export const KNOWN_LANGUAGE_OPTIONS = Object.entries(LANGUAGE_NAMES)
   .map(([value, label]) => ({ value, label }))
   .sort((a, b) => a.label.localeCompare(b.label));
 
+// Where the user may legally work. "EU" expands to the whole EEA server-side, so one
+// pick covers the common case. Any ISO2 code is accepted; this list is a convenience.
+export const WORK_RIGHTS_OPTIONS = [
+  { value: "eu", label: "EU / EEA" },
+  { value: "gb", label: "United Kingdom" },
+  { value: "ch", label: "Switzerland" },
+  { value: "ua", label: "Ukraine" },
+  { value: "us", label: "United States" },
+  { value: "ca", label: "Canada" },
+  { value: "au", label: "Australia" },
+  { value: "in", label: "India" },
+  { value: "ae", label: "United Arab Emirates" },
+  { value: "eg", label: "Egypt" },
+  { value: "tr", label: "Turkey" },
+];
+
 // Timezone picker. Value is the UTC offset (int); the label is a readable city.
 export const TIMEZONES: { offset: number; label: string }[] = [
   { offset: -8, label: "Los Angeles (PST)" },

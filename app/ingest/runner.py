@@ -25,9 +25,10 @@ from app.ingest.eligibility import (
     detect_remote_region,
     detect_visa_sponsorship,
     extract_required_utc_offsets,
+    extract_work_countries,
 )
 from app.ingest.experience import extract_min_years_experience
-from app.ingest.geo import is_european, resolve_city, resolve_country
+from app.ingest.geo import is_european, resolve_city, resolve_country, resolve_country_codes
 from app.ingest.language import (
     detect_language,
     extract_required_languages,
@@ -131,6 +132,12 @@ def _apply_derived(job: Job) -> None:
     job.visa_sponsorship = detect_visa_sponsorship(job.description)
     job.remote_region = detect_remote_region(job.description, is_remote=job.is_remote)
     job.required_utc_offsets = extract_required_utc_offsets(job.description)
+    location_codes = resolve_country_codes(job.location)
+    job.work_countries = extract_work_countries(job.description, location_codes)
+    # Remotive's location field IS candidate_required_location, so it states the
+    # restriction even when the body text does not.
+    if not job.work_countries and job.source == "remotive":
+        job.work_countries = location_codes
     job.salary_min, job.salary_max, job.salary_currency = extract_salary(job.description)
     job.effort_signals = extract_effort_signals(job.description)
     job.min_years_experience = extract_min_years_experience(job.description)

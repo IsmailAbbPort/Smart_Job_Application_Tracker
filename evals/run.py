@@ -3,7 +3,7 @@
     python -m evals.run                 # real OpenAI + Claude Haiku (reads .env keys)
     python -m evals.run --model claude-sonnet-4-6   # A/B a different judge model
     python -m evals.run --offline       # deterministic fakes, no network (smoke test)
-    python -m evals.run --stages matcher,judge --no-letters
+    python -m evals.run --stages matcher,prefilter,judge --no-letters
 
 The pipeline is three provider-injected stages (evaluate_matcher / evaluate_judge /
 evaluate_letters) reused verbatim by the CI test with the Fake providers, so what CI
@@ -38,7 +38,10 @@ from app.ai.embedder import (
 from app.ai.judge import FACTS_VERSION, AnthropicJudge, FakeJudge, Judge, build_job_text
 from app.ai.matching import cosine_similarity
 from app.config import get_settings
+from app.ingest.runner import _apply_derived
+from app.models import Job
 from app.schemas import CoverLetterResult, JudgeFacts, MatchTier
+from app.shortlist import eligibility_block
 from evals import metrics
 from evals.golden_set import GoldenCv, GoldenPair, GoldenSet, load_golden_set
 from evals.quality import AnthropicQualityJudge, FakeQualityJudge, LetterQuality, QualityJudge
@@ -99,6 +102,49 @@ def evaluate_matcher(
         "recall_at_k": {k: metrics.recall_at_k(relevances, k, total_relevant) for k in ks},
         "mrr": metrics.reciprocal_rank(relevances),
         "ndcg_at_k": {k: metrics.ndcg_at_k(gains, k) for k in ks},
+    }
+
+
+def evaluate_prefilter(pairs: list[GoldenPair], rules: CandidateRules) -> dict:
+    """Score the deterministic shortlist gate: how much noise it removes, and whether it
+    ever hides a pair the user called a fit.
+
+    Free and offline. Runs the real ingest derivation over each snapshot so the live
+    extractors are what gets measured, then the real `eligibility_block`.
+
+    `excluded_relevant` is the number that matters, and it must stay 0: a blocked strong
+    or medium pair is a job the user never sees, which is worse than any amount of noise
+    getting through. tests/test_evals.py asserts it.
+    """
+    excluded: dict[str, str] = {}
+    relevant_hidden: list[str] = []
+    for pair in pairs:
+        job = Job(
+            source=pair.job.source,
+            source_id=pair.job.source_id,
+            title=pair.job.title,
+            company=pair.job.company,
+            url=pair.job.url,
+            location=pair.job.location,
+            is_remote=pair.job.is_remote,
+            description=pair.job.description,
+        )
+        _apply_derived(job)
+        reason = eligibility_block(job, rules)
+        if reason:
+            excluded[pair.id] = reason
+            if pair.relevant:
+                relevant_hidden.append(pair.id)
+    weak = [p for p in pairs if not p.relevant]
+    weak_excluded = [p for p in weak if p.id in excluded]
+    return {
+        "n": len(pairs),
+        "excluded": len(excluded),
+        "excluded_relevant": len(relevant_hidden),
+        "excluded_relevant_ids": relevant_hidden,
+        "weak_excluded": len(weak_excluded),
+        "weak_share_excluded": (len(weak_excluded) / len(weak)) if weak else 0.0,
+        "reasons": excluded,
     }
 
 
@@ -217,7 +263,7 @@ def run_eval(
     judge: Judge,
     drafter: Drafter,
     ks: Iterable[int] = DEFAULT_KS,
-    stages: Iterable[str] = ("matcher", "judge", "letter"),
+    stages: Iterable[str] = ("matcher", "prefilter", "judge", "letter"),
     cv_ids: Iterable[int] | None = None,
     judge_cache: JsonCache | None = None,
     letter_cache: JsonCache | None = None,
@@ -249,6 +295,10 @@ def run_eval(
         result: dict = {"n_pairs": len(pairs)}
         if "matcher" in stages:
             result["matcher"] = evaluate_matcher(cv, pairs, embedder, ks)
+        if "prefilter" in stages:
+            result["prefilter"] = evaluate_prefilter(
+                pairs, CandidateRules(**golden.rules.model_dump())
+            )
         if "judge" in stages:
             rules = CandidateRules(**golden.rules.model_dump())
             result["judge"] = evaluate_judge(
@@ -297,6 +347,15 @@ def _aggregate(per_cv: dict[int, dict], ks: list[int], stages: set[str]) -> dict
             "recall_at_k": per_k("recall_at_k"),
             "mrr": metrics.mean([c["matcher"]["mrr"] for c in cvs]),
             "ndcg_at_k": per_k("ndcg_at_k"),
+        }
+    if "prefilter" in stages and cvs:
+        agg["prefilter"] = {
+            "excluded": sum(c["prefilter"]["excluded"] for c in cvs),
+            "excluded_relevant": sum(c["prefilter"]["excluded_relevant"] for c in cvs),
+            "weak_excluded": sum(c["prefilter"]["weak_excluded"] for c in cvs),
+            "weak_share_excluded": metrics.mean(
+                [c["prefilter"]["weak_share_excluded"] for c in cvs]
+            ),
         }
     if "judge" in stages and cvs:
         agg["judge"] = {
@@ -382,6 +441,13 @@ def _print_report(results: dict) -> None:
         print("  nDCG@k   " + "  ".join(f"{_fmt(m['ndcg_at_k'][k]):>6}" for k in ks))
         print(f"  MRR      {_fmt(m['mrr'])}\n")
 
+    if "prefilter" in agg:
+        p = agg["prefilter"]
+        print("PRE-FILTER (deterministic eligibility gate, no model call)")
+        print(f"  excluded           {p['excluded']} of {g['n_pairs']}")
+        print(f"  weak excluded      {p['weak_excluded']}  ({_fmt(p['weak_share_excluded'])})")
+        print(f"  WRONGLY excluded   {p['excluded_relevant']}  (must be 0)\n")
+
     if "judge" in agg:
         j = agg["judge"]
         print("JUDGE (rerank / classification + calibration)")
@@ -424,7 +490,9 @@ def main() -> None:
     parser.add_argument("--no-quality", action="store_true", help="Skip the letter-quality rubric")
     parser.add_argument("--embed-model", help="Embedding model override")
     parser.add_argument("--offline", action="store_true", help="Deterministic fakes, no network")
-    parser.add_argument("--stages", default="matcher,judge,letter", help="Comma list of stages")
+    parser.add_argument(
+        "--stages", default="matcher,prefilter,judge,letter", help="Comma list of stages"
+    )
     parser.add_argument("--no-letters", action="store_true", help="Skip the pricier letter stage")
     parser.add_argument("--cv", type=int, action="append", help="CV id to score (repeatable)")
     parser.add_argument("--k", default=",".join(str(k) for k in DEFAULT_KS), help="Comma list of k")

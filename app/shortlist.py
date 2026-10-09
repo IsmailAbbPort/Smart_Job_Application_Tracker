@@ -15,9 +15,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.ai.decide import expand_countries
 from app.ai.matching import experience_gap, experience_weight, rank_jobs, recency_weight
 from app.config import Settings, get_settings
 from app.ingest.eligibility import timezone_overlap_hours
+from app.ingest.geo import EUROPEAN_CC, resolve_country_codes
 from app.ingest.liveness import AGGREGATOR_SOURCES, sweep_dead_jobs
 from app.models import Cv, Job, SearchPreferences
 from app.prefs import get_preferences, preference_filters
@@ -28,6 +30,45 @@ log = logging.getLogger("app.shortlist")
 # the page size is plenty for a gentle, floored decay to reshuffle near-ties.
 _CANDIDATE_MULTIPLIER = 3
 _MAX_CANDIDATES = 300
+
+
+def eligibility_block(job: Job, rules) -> str | None:
+    """Why the user cannot take this job, or None to keep it. Cheap and deterministic.
+
+    `rules` is anything carrying `known_languages` and `work_rights`, which both
+    SearchPreferences and decide.CandidateRules do. Mirrors the judge's dealbreakers for
+    the two things that are decidable without a model call, so these jobs never reach the
+    list and never cost a judge call.
+
+    Precision over recall throughout, because a wrong block hides a job the user should
+    have seen: every unknown is kept, and a European listing with no stated restriction is
+    kept even when its country is outside the user's rights, since European job boards
+    routinely list one office country for a role that is open EU-wide (the GitLab and
+    ElevenLabs postings in the golden set are all like this). The judge still reads the
+    full text and can reject those.
+    """
+    known = {c.strip().lower() for c in (rules.known_languages or []) if c.strip()}
+    if known:
+        if job.language and job.language.lower() not in known:
+            return f"written in {job.language}"
+        missing = sorted(set(job.required_languages or []) - known)
+        if missing:
+            return f"requires {', '.join(missing)}"
+
+    rights = expand_countries(rules.work_rights or [])
+    if not rights:
+        return None
+    stated = expand_countries(job.work_countries or [])
+    if stated:
+        return None if stated & rights else f"hires only in {', '.join(sorted(stated))}"
+    located = expand_countries(resolve_country_codes(job.location))
+    if not located or located & rights:
+        return None
+    if not job.is_remote:
+        return f"on-site in {', '.join(sorted(located))}"
+    if not located & EUROPEAN_CC:
+        return f"listed outside Europe ({', '.join(sorted(located))})"
+    return None
 
 
 @dataclass
@@ -118,15 +159,13 @@ def rank_shortlist(
     lo, hi = (min(sims), max(sims)) if sims else (0.0, 1.0)
     span = hi - lo
 
-    # Languages the user speaks -> drop jobs requiring one they don't (hard filter).
-    # In Python (not SQL) because required_languages is a JSON array. Empty = off.
-    known_langs = {c.strip().lower() for c in (prefs.known_languages or []) if c.strip()}
-
     now = datetime.now(UTC)
     scored = []  # (job, similarity, recency, overlap, gap, rank_score)
     for job, similarity in ranked:
-        if known_langs and set(job.required_languages or []) - known_langs:
-            continue  # requires a language the user doesn't have
+        # Language and work-country eligibility, in Python (not SQL) because both read
+        # JSON arrays and the country side needs geo resolution. Empty prefs = off.
+        if eligibility_block(job, prefs):
+            continue
         # Timezone-overlap eligibility (see prefs.py: done here, not in SQL).
         overlap = timezone_overlap_hours(job.required_utc_offsets, prefs.user_utc_offset)
         if (

@@ -25,6 +25,7 @@ class JobOut(BaseModel):
     required_languages: list[str] = Field(default_factory=list)
     visa_sponsorship: bool | None = None
     remote_region: str | None = None
+    work_countries: list[str] = Field(default_factory=list)
     required_utc_offsets: list[int] = Field(default_factory=list)
     salary_min: int | None = None
     salary_max: int | None = None
@@ -443,6 +444,7 @@ class PreferencesOut(BaseModel):
     exclude_countries: list[str]
     exclude_cities: list[str]
     known_languages: list[str]
+    work_rights: list[str]
     max_age_days: int | None
     require_sponsorship: bool
     exclude_remote_regions: list[str]
@@ -463,6 +465,7 @@ class PreferencesUpdate(BaseModel):
     exclude_countries: list[str] | None = None
     exclude_cities: list[str] | None = None
     known_languages: list[str] | None = None
+    work_rights: list[str] | None = None
     max_age_days: int | None = None
     require_sponsorship: bool | None = None
     exclude_remote_regions: list[str] | None = None

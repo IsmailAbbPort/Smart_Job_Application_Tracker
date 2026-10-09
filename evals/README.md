@@ -19,15 +19,20 @@ change is decided from data, not vibes.
 | `golden_set.json` | The hand-labeled ground truth: (CV, job) pairs, each with a tier (strong/medium/weak). Committed. |
 | `metrics.py` | Pure scoring math (ranking, classification, calibration). No I/O; unit-tested in `tests/test_evals.py`. |
 | `run.py` | The runner. Loads the golden set, runs the stages, prints a table, writes results JSON. |
-| `curate.py` | Builds a fresh draft golden set by sampling the live corpus, and merges labels. |
+| `curate.py` | Builds a fresh draft golden set by sampling the live corpus, and merges labels. `--add-pairs N` appends from the filtered shortlist; `--refresh-descriptions` re-reads snapshots at the current char cap. |
 
 ## Metrics
 
 - **Matcher (ranking):** precision@k, recall@k, MRR, nDCG (graded: strong=2, medium=1,
   weak=0). Computed over the labeled pool, so it measures ordering, not full-corpus recall.
+- **Pre-filter (deterministic eligibility):** how many pairs the free language and
+  work-country gate removes, split by label. `excluded_relevant` must stay 0 and is
+  asserted in CI, since a wrong exclusion hides a job the user should have seen.
 - **Judge (classification + calibration):** per-tier precision/recall/F1, confusion
   matrix, accuracy, Cohen's kappa (plain and quadratic-weighted, since tiers are
-  ordinal), and Expected Calibration Error over the 0-100 score.
+  ordinal), AUROC of the 0-100 score against relevance, and Expected Calibration Error.
+  AUROC is the one to read: the score is a weighted requirement ratio, not a probability,
+  so ECE partly measures its scale, while AUROC only measures the ordering.
 - **Cover letter (grounding):** mean `grounded_ratio` and the share of letters with any
   unsupported claim.
 - **Cover letter (quality):** a G-Eval style LLM-judge rubric (`evals/quality.py`) scoring
@@ -235,17 +240,100 @@ Synthesia (label weak, v3 medium, the borderline relabel above), and ElevenLabs,
 model read the London location as a country restriction although the text says "we
 prioritize your talent, not your location".
 
+### Facts v4: the whole posting, and AUROC instead of ECE (2026-10-03)
+
+Two input bugs, found by auditing rather than by a metric moving. 22 of the 63 pairs were
+snapshotted at exactly 6000 chars, three of the four strong ones among them, so the
+eligibility paragraph that decides them was never in the prompt (GitLab's "Country Hiring
+Guidelines" starts at char 6004). And the constraint filter matched anywhere in a line, so
+it threw away real requirements that merely mentioned a constraint word ("Go language
+proficiency", "mentorship and horizontal sponsorship"), including the seniority asks ("12+
+years in software/ML engineering"), which raised the score on exactly the senior roles the
+rules exclude. Both caps now sit past the corpus p99 (about 12k chars), a line is dropped
+only when nothing but filler is left once the constraint phrase is removed, and
+`--refresh-descriptions` recovered 20 of the 22 truncated snapshots (the other 9 pairs'
+jobs have left the corpus and keep the text they have).
+
+Three samples, so this is a range rather than a point. The headline is that the v3 to v4
+gain sits **inside** run-to-run noise on 8 non-weak pairs: sample 1 lands exactly on the v3
+point estimate. The fixes are still right (the model genuinely could not read the
+eligibility text, and the regex genuinely ate real requirements), but three samples cannot
+show it.
+
+| Judge (63 pairs, facts v4) | Accuracy | Macro F1 | QWK | AC1 | Strong recall | Strong precision | AUROC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Facts v3 (one run) | 0.889 | 0.633 | 0.639 | 0.874 | 2/4 | 0.50 | - |
+| Facts v4, 3 samples | 0.889-0.921 | 0.633-0.702 | 0.639-0.701 | 0.874-0.912 | 2/4 | 0.50-0.667 | 0.926-0.945 |
+
+**AUROC is now the headline instead of ECE.** ECE asks whether `overall_score / 100` is a
+truthful probability, which it was never built to be: it is a weighted requirement ratio, so
+a poor ECE can mean nothing more than a mis-scaled score. AUROC asks the question the score
+is actually used for, whether the ordering is right, and it is unchanged by any monotonic
+rescaling. ECE stays in the results JSON.
+
+### 30 more pairs, and what they showed (2026-10-03)
+
+The set was sampled over the whole corpus, so only 8 of 63 pairs were a real fit and every
+strong/medium number rested on a handful. `--add-pairs` draws from the pool the shortlist
+actually shows (remote, not senior, engineering or data/ML), after dropping reposts of one
+role and capping any single company. 30 pairs, each labelled by hand against the full
+posting: **6 strong / 4 medium / 83 weak**, 93 total.
+
+The yield is the finding. 28 of the 30 are a bad fit, and not for subtle reasons: 9 require
+German at B2 to C2, 6 are scoped to a country with no work rights, 8 ask for Senior/Staff or
+5 to 12 years, 5 are infrastructure disciplines. That is a product problem, not a judge
+problem, and it is what the pre-filter below addresses.
+
+| Judge (93 pairs, facts v4, 3 samples) | Accuracy | Macro F1 | QWK | AC1 | Strong recall | Strong precision | AUROC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Facts v4 | 0.892-0.914 | 0.622-0.690 | 0.668-0.724 | 0.878-0.904 | 3-4 / 6 | 0.667-0.750 | 0.935-0.946 |
+
+Accuracy is not comparable to the 63-pair rows: weak is now 89% of the set, so accuracy
+inflates mechanically. AUROC barely moved (0.926-0.945 to 0.935-0.946), which is the point
+of reporting it.
+
+### Pre-filter: eligibility without a model call (2026-10-09)
+
+The 93-pair labelling showed that most of the noise is decidable from the text for free, so
+a required spoken language and a stated hiring country are now checked before the judge
+runs, in `app/shortlist.py::eligibility_block`. The `prefilter` stage scores it offline.
+
+| Pre-filter (93 pairs) | Excluded | Of which weak | Wrongly excluded |
+| --- | --- | --- | --- |
+| language + work country | 51 | 51 (61% of all weak pairs) | **0** |
+
+61% of the noise removed, nothing good hidden, and 51 fewer paid judge calls per run.
+`excluded_relevant` is asserted to be 0 in `tests/test_evals.py`: the gate hides jobs, so a
+false exclusion is a job the user never sees, and any future pattern that hides a strong or
+medium pair fails CI. That is why the country rule is deliberately incomplete: a remote role
+listed in a European country outside the user's rights is kept, because European boards
+routinely name one office country for a role open EU-wide (every UK-located pair labelled
+strong or medium in this set is like that). The judge still reads the full text.
+
 ### Cover letter (grounding)
 
-| Model | Mean grounded ratio | % with unsupported |
+| Draft prompt | Mean grounded ratio | % with unsupported |
 | --- | --- | --- |
-| claude-sonnet-4-6 | 0.993 | 12.5% (1 of 8 letters) |
+| v1 (cliches forbidden) | 0.993 | 12.5% (1 of 8 letters) |
+| **v2 (structure required)** | **1.000** | **0%** |
 
 ### Cover letter (quality rubric, 0-100)
 
-| Draft model | Overall | Specificity | Relevance | Authenticity | No-cliche |
+The v1 prompt listed phrases to avoid and the letters stayed generic. Naming the forbidden
+phrases puts them in the context and makes them likelier, and no prohibition adds
+specificity, which is what the rubric was scoring lowest. v2 asks for a shape instead: a
+hook only a reader of this posting could write, then one paragraph per requirement bridged
+to a named CV project and the outcome it records, plus examples of the target register. Same
+8 pairs, same grader, so the prompt is the only thing that differs.
+
+| Draft prompt | Overall | Specificity | Relevance | Authenticity | No-cliche |
 | --- | --- | --- | --- | --- | --- |
-| claude-sonnet-4-6 | 68.6 | 70.2 | 70.4 | 78.1 | 80.8 |
+| v1 (cliches forbidden) | 68.6 | 70.2 | 70.4 | 78.1 | 80.8 |
+| **v2 (structure required)** | **82.1** | **79.8** | **84.0** | **83.2** | **84.2** |
+
+Grounding improved alongside quality, so the specificity did not come at the cost of
+faithfulness. `LETTER_PROMPT_VERSION` keys the letter cache, because without it a prompt
+change silently scores letters cached from the old prompt.
 
 ## CI gate
 

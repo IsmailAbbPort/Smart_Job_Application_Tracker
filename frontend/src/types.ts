@@ -98,6 +98,7 @@ export interface Preferences {
   years_experience?: number | null;
   user_utc_offset?: number | null;
   known_languages?: string[];
+  work_rights?: string[];
   exclude_title_keywords?: string[];
   include_role_families?: string[];
   exclude_seniorities?: string[];

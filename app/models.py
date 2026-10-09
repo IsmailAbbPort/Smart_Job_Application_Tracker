@@ -76,9 +76,12 @@ class Job(Base):
     # visa_sponsorship: True offered / False refused / None unstated.
     # remote_region: region a remote role is locked to (us/eu/uk/...), null if open.
     # required_utc_offsets: timezone offsets the working hours demand (may be empty).
+    # work_countries: countries the text states it hires in (ISO2, or "EU" for the EEA),
+    # empty when unstated. Empty means unknown, never "nowhere".
     visa_sponsorship: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     remote_region: Mapped[str | None] = mapped_column(String(16), nullable=True)
     required_utc_offsets: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    work_countries: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Compensation (best-effort, currency-anchored) + application effort signals.
     salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -245,6 +248,10 @@ class SearchPreferences(Base):
     # ISO 639-1 codes the user can work in; jobs written in another language are
     # dropped from results when this is non-empty (empty = no language filtering).
     known_languages: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # ISO2 codes (or "EU"/"EEA") where the user may legally work. When non-empty, a job
+    # that states it only hires elsewhere is dropped, as is a job listed outside Europe.
+    # Empty = no country filtering, matching known_languages.
+    work_rights: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     # Hard freshness cutoff: drop postings older than this many days (null = off).
     # Jobs with no post date are kept. Distinct from the soft recency decay.
     max_age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
