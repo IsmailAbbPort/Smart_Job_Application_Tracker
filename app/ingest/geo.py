@@ -131,8 +131,13 @@ _COUNTRY_BY_NAME.update(
         "czech republic": "CZ",
         "the netherlands": "NL",
         "holland": "NL",
+        "republic of ireland": "IE",
     }
 )
+
+# Short forms that must only match in upper case, so the pronoun "us" in "join us in
+# Berlin" is never read as the United States.
+_CASED_ALIASES = {"US", "USA", "U.S.", "U.S.A.", "UK", "U.K.", "EU", "EEA", "EMEA"}
 
 # city name / alternate name -> list of (canonical name, ISO2, population)
 _CITY_INDEX: dict[str, list[tuple[str, str, int]]] = {}
@@ -144,6 +149,23 @@ for _c in _CITIES.values():
             _CITY_INDEX.setdefault(_key, []).append(_entry)
 
 _SPLIT_RE = re.compile(r"[;,/|()\-]| or | in ")
+
+# Names matched case-insensitively (on normalized text), longest first so "united states"
+# wins over "united"; the cased short forms are matched separately on the raw text.
+_MENTION_RE = re.compile(
+    r"\b(?:"
+    + "|".join(
+        re.escape(name)
+        for name in sorted(_COUNTRY_BY_NAME, key=len, reverse=True)
+        if name.upper() not in _CASED_ALIASES and len(name) > 3
+    )
+    + r")\b"
+)
+_CASED_RE = re.compile(
+    r"(?<![A-Za-z])(?:"
+    + "|".join(re.escape(alias) for alias in sorted(_CASED_ALIASES, key=len, reverse=True))
+    + r")(?![A-Za-z])"
+)
 
 
 def _segments(location: str) -> list[str]:
@@ -209,6 +231,77 @@ def _resolve(location: str | None) -> tuple[str | None, str | None, bool]:
 
     city = chosen_city if (chosen_city and chosen_cc in EUROPEAN_CC) else None
     return (city, country, is_eu)
+
+
+def _segment_codes(segments: list[str]) -> list[str]:
+    """Country codes named by whole segments, retrying each without its stopwords.
+
+    Whole segments only, as in `_resolve`, so "wales" inside "New South Wales" cannot
+    resolve Australia to the UK. The stopword retry is what lets "all france (remote)"
+    reach France, since the raw segment "all france" is not a country name.
+    """
+    codes: list[str] = []
+    for seg in segments:
+        if seg in _COUNTRY_BY_NAME:
+            codes.append(_COUNTRY_BY_NAME[seg])
+            continue
+        trimmed = " ".join(w for w in seg.split() if w not in _STOPWORDS)
+        if trimmed and trimmed != seg and trimmed in _COUNTRY_BY_NAME:
+            codes.append(_COUNTRY_BY_NAME[trimmed])
+    return codes
+
+
+@lru_cache(maxsize=8192)
+def _country_codes(location: str | None) -> tuple[str, ...]:
+    """Every country a location names, not just the first. See resolve_country_codes."""
+    if not location:
+        return ()
+    out: list[str] = []
+    # Semicolons separate whole locations ("Remote, Canada; Remote, United States"), so
+    # each part gets its own city fallback rather than one winner for the whole string.
+    for part in _norm(location).split(";"):
+        segments = [s.strip() for s in _SPLIT_RE.split(part) if s.strip()]
+        if not segments:
+            continue
+        codes = _segment_codes(segments)
+        if not codes:
+            phrases = _phrases(segments)
+            matches = [m for p in phrases if p not in _STOPWORDS for m in _CITY_INDEX.get(p, ())]
+            if matches:
+                codes = [max(matches, key=lambda m: m[2])[1]]
+            elif any(t in phrases for t in _REGION_TOKENS):
+                codes = ["EU"]
+        out.extend(codes)
+    return tuple(sorted(set(out)))
+
+
+def resolve_country_codes(location: str | None) -> list[str]:
+    """Every country the location names, as ISO2 codes, with 'EU' for a region token.
+
+    `resolve_country` answers "which country is this", picking one; this answers "which
+    countries does this allow", which is the question an eligibility filter asks. Empty
+    when the location names no place ("Remote", "Worldwide", "Anywhere").
+    """
+    return list(_country_codes(location))
+
+
+def country_codes_mentioned(text: str) -> list[str]:
+    """Country codes named anywhere in a short piece of text, as ISO2 plus 'EU'.
+
+    For reading a sentence that states where a role may be done. Deliberately looser
+    than `resolve_country_codes` (it matches names mid-sentence), so callers must only
+    hand it text they have already established is about eligibility: run over a whole
+    posting it would match every country the marketing copy happens to name.
+    """
+    out: set[str] = set()
+    for match in _MENTION_RE.finditer(_norm(text)):
+        out.add(_COUNTRY_BY_NAME[match.group(0)])
+    for match in _CASED_RE.finditer(text):
+        token = match.group(0)
+        out.add("EU" if token in ("EU", "EEA", "EMEA") else _COUNTRY_BY_NAME[_norm(token)])
+    if any(t in _norm(text) for t in _REGION_TOKENS):
+        out.add("EU")
+    return sorted(out)
 
 
 def resolve_city(location: str | None) -> str | None:

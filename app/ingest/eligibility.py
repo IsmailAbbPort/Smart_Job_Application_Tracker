@@ -5,6 +5,7 @@ great match worthless if they fail:
 
 - `detect_visa_sponsorship`: does the posting offer / refuse visa sponsorship?
 - `detect_remote_region`: is a "remote" role secretly locked to a region (US-only)?
+- `extract_work_countries`: which countries the text says it hires in, if it says.
 - `extract_required_utc_offsets`: which working-hours timezone(s) it demands, as
   UTC offsets, so overlap with the candidate's timezone can be scored.
 
@@ -15,6 +16,8 @@ leave a signal null and let the judge read the nuance than to wrongly gate a job
 from __future__ import annotations
 
 import re
+
+from app.ingest.geo import country_codes_mentioned
 
 # --- visa sponsorship -------------------------------------------------------
 
@@ -82,6 +85,62 @@ def detect_remote_region(text: str | None, *, is_remote: bool) -> str | None:
                     return code
                 idx = lower.find(phrase, idx + 1)
     return None
+
+
+# --- stated hiring countries ------------------------------------------------
+
+# A sentence only states a hiring restriction if it pairs one of these with a country
+# name. Each needs a modal or an eligibility noun, because the bare verb is far too
+# common: "our customers are based in the US" and "if you are based in France, you will
+# have a French contract" are not restrictions, and a plain "based in" would catch both.
+_SCOPE_CUE = re.compile(
+    r"(?:must|need(?:s)? to|required to|have to|should|can only|only)\s+"
+    r"(?:be\s+|have\s+|already\s+)?(?:based|located|resid\w*|live|living|a resident)"
+    r"|(?:candidates?|applicants?|experts?|those|anyone|people|team members)\s+"
+    r"(?:who are\s+)?(?:located|based|resid\w*|living)\s+(?:anywhere\s+)?in"
+    r"|(?:only|exclusively)\s+(?:open to|available (?:to|for)|hiring|considering|accepting)"
+    r"|(?:can|able to|eligible to|allowed to)\s+hire\s+"
+    r"(?:new )?(?:candidates?|people|team members|employees)?\s*(?:based|located)?\s*in"
+    r"|available (?:for|to) candidates (?:located|based) in"
+    r"|(?:looking for|hiring|recruiting|accepting)\s+"
+    r"(?:candidates?|applicants?|people|team members)\s+(?:located |based )?in"
+    r"|(?:right|authori[sz]ation|eligib\w+|permit|permission)\s+to work in"
+    r"|(?:have )?resided in"
+    r"|this (?:role|position) is (?:only )?(?:open|available) (?:to|for|in)",
+    re.IGNORECASE,
+)
+
+# Greenhouse boilerplate: the restriction is the posting's own location field, named
+# nowhere in the sentence, so the caller's resolved location codes are the answer.
+_SCOPE_IS_LOCATION = re.compile(
+    r"only available for remote work within the specified country", re.IGNORECASE
+)
+
+_SENTENCE_SPLIT_RE = re.compile(r"[.;\n!?]+")
+
+
+def extract_work_countries(text: str | None, location_codes: list[str] | None = None) -> list[str]:
+    """Countries the posting states it hires in, as ISO2 codes (plus 'EU'), else [].
+
+    Sentence-scoped on purpose: a country name only counts when the sentence it sits in
+    also states a restriction, because a posting names plenty of countries it is not
+    hiring in (customers, offices, funding). Empty means unstated, never "nowhere", so a
+    caller must treat [] as "keep".
+
+    Recall is deliberately partial. This catches the common recruiter phrasings and
+    leaves everything subtler to the judge, which reads the whole text. Precision is
+    what matters here, since the result hides jobs.
+    """
+    if not text:
+        return []
+    found: set[str] = set()
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if _SCOPE_IS_LOCATION.search(sentence):
+            found.update(location_codes or ())
+            continue
+        if _SCOPE_CUE.search(sentence):
+            found.update(country_codes_mentioned(sentence))
+    return sorted(found)
 
 
 # --- timezone requirement ---------------------------------------------------

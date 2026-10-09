@@ -6,6 +6,7 @@ from app.ingest.eligibility import (
     detect_remote_region,
     detect_visa_sponsorship,
     extract_required_utc_offsets,
+    extract_work_countries,
     timezone_overlap_hours,
 )
 from app.models import Cv, Job
@@ -129,3 +130,48 @@ def test_backfill_sets_eligibility(client, session_factory):
         assert job.visa_sponsorship is False
         assert job.remote_region == "us"
         assert job.required_utc_offsets == [-8]
+
+
+def test_extract_work_countries_reads_a_stated_restriction():
+    cases = [
+        ("Must be located in France.", ["FR"]),
+        ("This role is open to experts located anywhere in the United Kingdom.", ["GB"]),
+        ("Must have resided in the United States for the past three consecutive years.", ["US"]),
+        (
+            "This role is available for candidates located in the UK, Germany, "
+            "Spain, Ireland and Sweden.",
+            ["DE", "ES", "GB", "IE", "SE"],
+        ),
+        ("We are looking for candidates in the UK, Spain and Ireland only.", ["ES", "GB", "IE"]),
+        ("You need an existing right to work in Germany.", ["DE"]),
+    ]
+    for text, expected in cases:
+        assert extract_work_countries(text) == expected, text
+
+
+def test_extract_work_countries_ignores_a_country_that_is_not_a_restriction():
+    # The whole point of scoping to a sentence with a restriction cue: a posting names
+    # plenty of countries it is not hiring in. A false block hides a real job.
+    for text in (
+        "We sell into the United States and Canada.",
+        "Our customers are German Mittelstand companies in Germany.",
+        "If you are based in France, you will have a French contract.",
+        "We have offices in London, New York, San Francisco, and Warsaw.",
+        "This role is remote and can be executed globally.",
+        "Our teams are distributed between France, USA, UK, Germany and Singapore.",
+        "GitLab hires new team members in countries around the world.",
+        "We are hiring across France, Spain, Belgium, and Canada.",
+    ):
+        assert extract_work_countries(text) == [], text
+    assert extract_work_countries(None) == []
+    assert extract_work_countries("") == []
+
+
+def test_greenhouse_boilerplate_restriction_falls_back_to_the_location():
+    # The sentence names no country; the posting's own location is the restriction.
+    text = (
+        "Positions listed as Remote are only available for remote work "
+        "within the specified country."
+    )
+    assert extract_work_countries(text, ["US"]) == ["US"]
+    assert extract_work_countries(text, []) == []

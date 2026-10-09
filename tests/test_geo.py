@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from app.ingest.geo import is_european, location_identity, resolve_city, resolve_country
+from app.ingest.geo import (
+    country_codes_mentioned,
+    is_european,
+    location_identity,
+    resolve_city,
+    resolve_country,
+    resolve_country_codes,
+)
 
 
 @pytest.mark.parametrize(
@@ -102,3 +109,47 @@ def test_resolve_city(location, expected):
 )
 def test_location_identity(location, expected):
     assert location_identity(location) == expected
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        # Every country, not just the first: a multi-country repost allows both.
+        ("Remote, Canada; Remote, United States", ["CA", "US"]),
+        ("Remote - United States", ["US"]),
+        ("Sweden (Remote)", ["SE"]),
+        ("Republic of Ireland (Remote)", ["IE"]),
+        ("All France (remote)", ["FR"]),  # stopword-trimmed segment still resolves
+        ("Remote-EMEA", ["EU"]),
+        ("Remote, Bangalore", ["IN"]),
+        ("Yerevan", ["AM"]),
+        ("New South Wales, Australia", ["AU"]),
+        # No place named: unknown, so callers keep the job.
+        ("Remote", []),
+        ("Worldwide", []),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_resolve_country_codes(location, expected):
+    assert resolve_country_codes(location) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Must be located in France", ["FR"]),
+        (
+            "candidates in the UK, Germany, Spain, Ireland and Sweden",
+            ["DE", "ES", "GB", "IE", "SE"],
+        ),
+        ("remote within the EU", ["EU"]),
+        ("Are you located in the UK or Poland?", ["GB", "PL"]),
+        # "us" as a pronoun must never read as the United States, so the short aliases
+        # only match in upper case.
+        ("join us in Berlin and help us grow", []),
+        ("executed globally", []),
+    ],
+)
+def test_country_codes_mentioned(text, expected):
+    assert country_codes_mentioned(text) == expected
