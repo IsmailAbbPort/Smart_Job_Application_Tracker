@@ -84,7 +84,13 @@ Labels are the ground truth everything is measured against, so they are hand-mad
 2. Fill each tier (a `{pair_id: {tier, rationale}}` map), then
    `python -m evals.curate --apply-labels <labels>.json` merges and validates them.
 
-`status` is `draft` until a human signs off, then flip it to `reviewed`.
+`status` is `draft` until the labels have been reviewed, then `reviewed`. The current set is
+`reviewed`: every pair was labelled against the full posting and then re-reviewed pair by
+pair by a second model under rules its owner confirmed, which is recorded in the file's
+`notes` along with what that review was not (line-by-line human sign-off). Treat a single
+pair's tier as reviewed judgement rather than certain ground truth, and expect the odd label
+to be wrong: two were, and finding them moved the metrics more than any model change has
+(see "Labels reviewed" below).
 
 **CV text is not committed.** The committed `golden_set.json` stores a placeholder for each
 CV; the real CV text lives in `evals/cvs.local.json` (gitignored). `curate.py` writes it there
@@ -309,6 +315,45 @@ medium pair fails CI. That is why the country rule is deliberately incomplete: a
 listed in a European country outside the user's rights is kept, because European boards
 routinely name one office country for a role open EU-wide (every UK-located pair labelled
 strong or medium in this set is like that). The judge still reads the full text.
+
+### Labels reviewed, and the judge was right where I was wrong (2026-10-09)
+
+Every one of the 93 labels was re-reviewed pair by pair by a second model under the same
+rules, told to disagree rather than ratify. It changed two tiers, and both were mine:
+
+- **j8715** (GitLab EMEA, UK) strong -> **weak**. This label had been flipped to strong from
+  the live posting, which asks "Are you located in the UK or Poland?". The ingested snapshot
+  contains neither "Poland" nor "United Kingdom" in 7454 chars: the only country signal is
+  the `location` field, `Remote, United Kingdom`. **A label has to be derivable from the
+  snapshot the judge reads**, or the eval is scoring the judge against facts it cannot see.
+  Its Poland-scoped twin j8714 carries that case properly.
+- **j8438** (Lucid Labs) strong -> **medium**. "Remote, but not anonymous. Our team works
+  mostly out of Berlin, with a team day every Wednesday" is hybrid in practice, and two
+  requirements the posting marks Important (working eval-driven, having built agent systems
+  with tool calling and human-in-the-loop) are absent from the CV.
+
+Also rewritten: two rationales that reached the right tier by the wrong route (j6817 called a
+posting on-site that states neither, j2723 blamed a Paris location when "Senior" is the
+actual dealbreaker), and seven that quoted the structured `location` field as though it were
+description text, which reads as fabricated evidence to anyone checking.
+
+Set is now **4 strong / 5 medium / 84 weak**, `status: reviewed`.
+
+| Judge (93 pairs, facts v4, 3 samples) | Accuracy | Macro F1 | QWK | AC1 | Strong recall | Strong precision | AUROC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Draft labels | 0.892-0.914 | 0.622-0.690 | 0.668-0.724 | 0.878-0.904 | 3-4 / 6 | 0.667-0.750 | 0.935-0.946 |
+| **Reviewed labels** | **0.914-0.925** | **0.714-0.740** | **0.768-0.806** | **0.903-0.916** | **3-4 / 4** | **0.667-0.750** | **0.974-0.984** |
+
+Read that honestly: **the model did not change between those two rows.** Every number moved
+because the ground truth got more correct, and the two labels that were wrong were exactly
+the two the judge was being marked down on. The judge had been right about both. That makes
+label review, not prompt or rule tuning, the highest-leverage work left on this eval, and it
+is the single clearest result in this file.
+
+The remaining weakness is unchanged and now slightly sharper: with 4 strong and 5 medium out
+of 93, a judge that answered "weak" to everything would score about 90% accuracy. That is
+why AUROC leads these tables, and why growing the positive side matters more than any
+further tuning.
 
 ### Cover letter (grounding)
 
