@@ -268,6 +268,11 @@ class AnthropicRoleClassifier:
     Fails soft: a batch the API errors on leaves its titles None (the pipeline only
     classifies null rows, so they are retried next run), and a failed CV suggestion
     returns [] rather than breaking the upload.
+
+    Failing soft is not the same as failing silently. `last_failures` holds the
+    exceptions from the most recent `classify_titles` call, so a caller can report
+    them (a rejected key or an exhausted balance looked exactly like "nothing to
+    classify" when they only went to the log).
     """
 
     def __init__(
@@ -285,15 +290,18 @@ class AnthropicRoleClassifier:
         self._client = client
         self.model = model
         self._batch = batch_size
+        self.last_failures: list[Exception] = []
 
     def classify_titles(self, titles: list[str]) -> list[str | None]:
         out: list[str | None] = [None] * len(titles)
+        self.last_failures = []
         for start in range(0, len(titles), self._batch):
             chunk = titles[start : start + self._batch]
             try:
                 labels = self._label_batch(chunk)
-            except Exception:  # noqa: BLE001 - one bad batch must not sink the run
+            except Exception as exc:  # noqa: BLE001 - one bad batch must not sink the run
                 log.exception("role classification batch at %d failed", start)
+                self.last_failures.append(exc)
                 continue
             for idx, fam in labels.items():
                 if 0 <= idx < len(chunk):

@@ -104,6 +104,18 @@ class Settings(BaseSettings):
     ingest_hour_utc: int = 3
     ingest_embed_limit: int = 5000
     ingest_classify_limit: int = 6000
+    # On startup, run a catch-up ingest when the last recorded run is older than
+    # this. 20 rather than 24 so a laptop opened a little earlier each day still
+    # gets a daily run instead of drifting into skipping one.
+    ingest_catchup_after_hours: int = 20
+
+    # Telegram notifications (app/notify/). Both unset -> the notifier is inert, so
+    # tests, CI and a fresh clone behave exactly as before. notify_heartbeat_days
+    # sends a "still running" line after that many quiet days (0 disables it), so
+    # prolonged silence can be told apart from a dead stack.
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    notify_heartbeat_days: int = 7
 
     # Liveness sweep of aggregator jobs (app/ingest/liveness.py). Outbound checks are
     # serialized at one per liveness_min_interval_seconds so the aggregator's CDN

@@ -24,6 +24,7 @@ from app.routers import (
     jobs,
     letters,
     match,
+    ops,
     preferences,
     targets,
     views,
@@ -58,6 +59,7 @@ app.include_router(preferences.router)
 app.include_router(applications.router)
 app.include_router(letters.router)
 app.include_router(views.router)
+app.include_router(ops.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

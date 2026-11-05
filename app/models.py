@@ -394,6 +394,44 @@ class AiUsage(Base):
     count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class PipelineRun(Base):
+    """One execution of the daily ingest pipeline (app/scheduler.py).
+
+    Three jobs at once: it is the input to the catch-up decision on startup (when
+    did this last succeed), the body of the Telegram message, and the answer to
+    "did it run" without reading container logs. A row is opened with
+    status='running' and closed in a finally, so a killed process leaves a
+    'running' row behind - that leftover is how the next startup detects it was
+    interrupted.
+
+    `status`: 'running' in flight, 'partial' when the pipeline finished but a
+    source reported an error, 'failed' when it raised before finishing, else 'ok'.
+    JSON (not JSONB) so the SQLite-backed tests exercise this table too.
+    """
+
+    __tablename__ = "pipeline_run"
+    __table_args__ = (Index("ix_pipeline_run_status_started", "status", "started_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False, default="schedule")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    inserted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    removed_stale: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    embedded: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    classified: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Per-source {inserted, status, error}, from IngestSummary.as_dict()["sources"].
+    sources: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Classified problem codes, so the next run can dedup and spot recoveries.
+    problems: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class TargetCompany(Base):
     """A company whose ATS board we monitor directly.
 
