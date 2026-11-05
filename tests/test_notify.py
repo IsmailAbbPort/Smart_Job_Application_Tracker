@@ -275,6 +275,14 @@ def test_a_clean_quiet_run_says_nothing():
     assert format_run_message(run, now=NOW) is None
 
 
+def test_a_reclassify_only_run_says_nothing():
+    # Every source throttled, so nothing new, but the classifier still walked the
+    # whole corpus. The counts are a detail of news, not news themselves.
+    run = make_run(embedded=0, classified=4254)
+
+    assert format_run_message(run, now=NOW) is None
+
+
 def test_a_degraded_but_successful_run_still_reports():
     run = make_run(
         inserted=5,

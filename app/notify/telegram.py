@@ -125,7 +125,9 @@ def format_run_message(
         if run.inserted:
             plural = "" if run.inserted == 1 else "s"
             body.append(f"{run.inserted} new job{plural}{_breakdown(run)}")
-        if run.embedded or run.classified:
+            # Subordinate to the new-jobs line on purpose: the classifier walks the
+            # whole corpus every run, so counting it as news would ping daily about
+            # a run that ingested nothing.
             body.append(f"embedded {run.embedded}, classified {run.classified}")
 
     if problems:
