@@ -122,6 +122,42 @@ curl "http://localhost:8000/match/shortlist?is_remote=true&europe=true&limit=10"
 Cost awareness: judging one job with Haiku is a fraction of a cent; a Sonnet cover letter is
 one to two cents. Dogfooding a whole search costs single-digit dollars.
 
+Adminer (a browser DB viewer) sits behind a compose profile so it is not part of the
+always-on footprint: `docker compose --profile tools up -d adminer`, then
+http://localhost:8080.
+
+## Running it as a local appliance (Windows)
+
+For personal daily use on one laptop, `scripts/local/` turns the stack into a desktop app
+that ingests whether or not the UI is ever opened:
+
+```powershell
+# one-time: a Desktop shortcut, and a logon task that brings the stack up in the background
+powershell -ExecutionPolicy Bypass -File scripts\local\install-shortcut.ps1
+powershell -ExecutionPolicy Bypass -File scripts\local\install-autostart.ps1
+```
+
+`start-tracker.cmd` starts Docker Desktop if the engine is down, brings the containers up,
+waits for `/health`, and opens the UI in an app-mode browser window (`--no-browser` skips
+that, which is what the logon task uses).
+
+A laptop asleep through the scheduled ingest hour used to skip the day silently. Now every
+run writes a `pipeline_run` row, and startup queues a catch-up run when the last one is
+older than `INGEST_CATCHUP_AFTER_HOURS`:
+
+```bash
+curl "http://localhost:8000/ops/runs?limit=5"      # did it run, and what did it find
+curl -X POST "http://localhost:8000/ops/notify-test"  # verify the Telegram credentials
+```
+
+`scripts\local\backup-db.cmd` dumps the database into `backups/` (gzipped, newest 7 kept).
+Worth running occasionally: `pgdata` is a named volume inside Docker Desktop's WSL2 disk
+image, so no file backup of this folder covers it.
+
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` to get one message per run with new jobs and
+any problems (a dead source, a rejected key, an exhausted balance), each with the actual
+remedy rather than a traceback fragment. Unset, the notifier is inert.
+
 ## Layout
 
 ```

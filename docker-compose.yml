@@ -1,6 +1,9 @@
 services:
   db:
     image: pgvector/pgvector:pg16
+    # Always-on local appliance: come back with Docker Desktop after a reboot, or
+    # after the engine drops (which it does on this machine, unprompted).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,6 +20,7 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -29,6 +33,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Error tracking (optional). Unset -> Sentry init is a no-op.
       SENTRY_DSN: ${SENTRY_DSN:-}
+      # Telegram notifications (optional). Both unset -> the notifier is inert.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      NOTIFY_HEARTBEAT_DAYS: ${NOTIFY_HEARTBEAT_DAYS:-7}
       # AI models are env-swappable; defaults apply when unset.
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
@@ -41,18 +49,24 @@ services:
     # Migrate, seed target companies (idempotent), then serve. DB is healthy via depends_on.
     command: sh -c "alembic upgrade head && python -m app.ingest.targets && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
-      - "8000:8000"
+      # Loopback only: this runs on a laptop that joins untrusted networks, and the
+      # API has no auth in front of it locally.
+      - "127.0.0.1:8000:8000"
 
   # Lightweight browser-based DB viewer for local dev (http://localhost:8080).
   # Login: System=PostgreSQL, Server=db, User=postgres, Password=postgres, DB=jobtracker.
+  # Behind a profile: not part of the always-on footprint, and its host port clashes
+  # with an unrelated container on this machine. Start it on demand with
+  # `docker compose --profile tools up -d adminer`.
   adminer:
     image: adminer:4
+    profiles: ["tools"]
     depends_on:
       - db
     environment:
       ADMINER_DEFAULT_SERVER: db
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
 volumes:
   pgdata:

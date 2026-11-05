@@ -56,3 +56,6 @@ evals/cvs.local.json
 /Must-do for complete.txt
 /Stuff to change.txt
 sjt-demo-build/
+
+# Local database dumps (scripts/local/backup-db.cmd). Large, and personal data.
+backups/

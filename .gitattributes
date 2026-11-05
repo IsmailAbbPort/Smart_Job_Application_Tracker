@@ -1,6 +1,12 @@
 # Normalize all text files to LF in the repo, regardless of OS checkout.
 * text=auto eol=lf
 
+# Windows launchers must be checked out with CRLF: cmd.exe mis-parses labels and
+# goto in an LF-only batch file.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.vbs text eol=crlf
+
 # Binaries: never touch.
 *.png binary
 *.jpg binary
