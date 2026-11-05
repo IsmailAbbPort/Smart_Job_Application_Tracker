@@ -49,13 +49,18 @@ class GreenhouseSource:
     ttl_seconds = TTL_SECONDS
     full_catalog = True
     fetched_slugs: frozenset[str] | set[str] = frozenset()
+    http_errors: dict[str, int] = {}
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []
         answered: set[str] = set()
+        errors: dict[str, int] = {}
         for target in active_targets(session, NAME):
             resp = client.get(_BASE.format(slug=target.slug))
             if resp.status_code != 200:
+                # Reported, not raised: one retired board among many is routine, so the
+                # runner decides whether this amounts to the source being down.
+                errors[target.slug] = resp.status_code
                 continue
             # Recorded even when the board is empty: that is a board with nothing left
             # to offer, not a board we failed to reach, and the sweep must tell them apart.
@@ -63,4 +68,5 @@ class GreenhouseSource:
             out.extend(parse(resp.json(), slug=target.slug, company=target.company))
             time.sleep(_POLITE_DELAY)
         self.fetched_slugs = answered
+        self.http_errors = errors
         return out

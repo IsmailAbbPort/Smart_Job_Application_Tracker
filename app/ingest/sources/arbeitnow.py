@@ -42,15 +42,20 @@ class ArbeitnowSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
     full_catalog = False
+    http_errors: dict[str, int] = {}
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
         out: list[CanonicalJob] = []
+        self.http_errors = {}
         url: str | None = _BASE
         for _ in range(_MAX_PAGES):
             if not url:
                 break
             resp = client.get(url)
             if resp.status_code != 200:
+                # A bad status on page one means the source is unreachable; on a later
+                # page we keep what we already have, and the runner sees fetched > 0.
+                self.http_errors = {NAME: resp.status_code}
                 break
             payload = resp.json()
             out.extend(parse(payload))

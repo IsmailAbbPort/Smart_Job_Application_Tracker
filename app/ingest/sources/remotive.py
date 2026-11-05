@@ -43,9 +43,13 @@ class RemotiveSource:
     name = NAME
     ttl_seconds = TTL_SECONDS
     full_catalog = False
+    http_errors: dict[str, int] = {}
 
     def fetch(self, client: httpx.Client, session: Session) -> list[CanonicalJob]:
+        self.http_errors = {}
         resp = client.get(_BASE)
         if resp.status_code != 200:
+            # One endpoint, so a bad status means the whole source is unreachable.
+            self.http_errors = {NAME: resp.status_code}
             return []
         return parse(resp.json())

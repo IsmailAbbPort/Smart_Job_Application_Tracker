@@ -74,6 +74,9 @@ class IngestStats:
     removed_stale: int = 0  # deleted: gone from a full-catalogue source's feed
     skipped_throttled: bool = False
     error: str | None = None
+    # endpoint/slug -> non-200 status. Adapters report these instead of raising,
+    # because one retired ATS board among many is routine rather than a failure.
+    http_errors: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -251,6 +254,13 @@ def ingest_source(
     try:
         jobs = source.fetch(client, session)
         stats.fetched = len(jobs)
+        stats.http_errors = dict(getattr(source, "http_errors", None) or {})
+        # A source that brought back nothing AND saw bad statuses is down, not empty.
+        # Without this a 503 looked identical to a genuinely empty feed: status ok,
+        # 0 inserted, no error, and so no notification at all.
+        if stats.http_errors and not jobs:
+            worst = max(stats.http_errors.values())
+            stats.error = f"HTTPStatusError: HTTP {worst}"
         _persist(session, name, jobs, stats)
         # For full-catalogue sources, remove postings that dropped out of the feed.
         if getattr(source, "full_catalog", False):
@@ -261,7 +271,7 @@ def ingest_source(
                 stats,
                 answered_slugs=getattr(source, "fetched_slugs", None) or None,
             )
-        cache.record_fetch(session, name, status="ok", count=len(jobs))
+        cache.record_fetch(session, name, status="error" if stats.error else "ok", count=len(jobs))
         session.commit()
     except Exception as exc:  # noqa: BLE001 - surface any source failure as stats
         session.rollback()
