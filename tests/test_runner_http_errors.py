@@ -16,16 +16,30 @@ from tests.conftest import make_canonical
 
 
 class _StatusSource:
-    """Source that reports HTTP errors the way the real adapters now do."""
+    """Source that reports HTTP errors the way the real adapters now do.
+
+    Sets its attributes in `fetch`, not in `__init__`, because that is what the real
+    adapters do and the difference matters: the runner reads them after calling
+    fetch, so a double that filled them in early would pass even if the runner read
+    them at the wrong time.
+    """
 
     ttl_seconds = 3600
 
-    def __init__(self, name, jobs, http_errors):
+    def __init__(self, name, jobs, http_errors, *, fetched_slugs=None, full_catalog=False):
         self.name = name
         self._jobs = jobs
-        self.http_errors = http_errors
+        self._http_errors = http_errors
+        self._fetched_slugs = fetched_slugs
+        self.full_catalog = full_catalog
+        self.http_errors: dict[str, int] = {}
+        if fetched_slugs is not None:
+            self.fetched_slugs: frozenset[str] | set[str] = frozenset()
 
     def fetch(self, client, session):  # noqa: ANN001 - args unused
+        self.http_errors = dict(self._http_errors)
+        if self._fetched_slugs is not None:
+            self.fetched_slugs = set(self._fetched_slugs)
         return list(self._jobs)
 
 
@@ -77,6 +91,83 @@ def test_the_worst_status_is_the_one_reported(monkeypatch, session, no_throttle)
     stats = _run(monkeypatch, session, source)
 
     assert "503" in stats.error
+
+
+def test_worst_means_most_serious_not_numerically_largest(monkeypatch, session, no_throttle):
+    # A rejected or moved endpoint (401/403) is a thing to go and fix; a 404 is
+    # usually just a board that closed. Picking the larger number reported the 404
+    # and pointed the message at the wrong one of the two.
+    source = _StatusSource("greenhouse", [], {"a": 404, "b": 403})
+
+    stats = _run(monkeypatch, session, source)
+
+    assert "403" in stats.error
+
+
+def test_boards_that_answered_but_had_nothing_are_not_a_dead_source(
+    monkeypatch, session, no_throttle
+):
+    # Greenhouse answered for eight companies that simply have no openings, and
+    # 404'd for one that closed its board. Judging that on "no jobs plus some bad
+    # status" called the whole source down and sent a false alarm.
+    source = _StatusSource(
+        "greenhouse", [], {"closed": 404}, fetched_slugs={"acme", "globex"}, full_catalog=True
+    )
+
+    stats = _run(monkeypatch, session, source)
+
+    assert stats.error is None
+    assert stats.http_errors == {"closed": 404}
+
+
+def test_a_source_whose_every_board_failed_is_down(monkeypatch, session, no_throttle):
+    source = _StatusSource(
+        "greenhouse", [], {"acme": 503, "globex": 503}, fetched_slugs=set(), full_catalog=True
+    )
+
+    stats = _run(monkeypatch, session, source)
+
+    assert stats.error is not None
+    assert "503" in stats.error
+
+
+def test_a_failed_fetch_is_recorded_on_the_throttle_row(monkeypatch, session):
+    # record_fetch is what the per-source TTL reads. The other tests stub it out, so
+    # nothing covered the fact that a failing source still has to write that row -
+    # if it did not, the next run would re-hit a dead source with no backoff at all.
+    recorded: list[tuple] = []
+    monkeypatch.setattr(runner.cache, "should_fetch", lambda *a, **k: True)
+    monkeypatch.setattr(
+        runner.cache,
+        "record_fetch",
+        lambda session, name, *, status, count: recorded.append((name, status, count)),
+    )
+
+    _run(monkeypatch, session, _StatusSource("remotive", [], {"remotive": 503}))
+
+    assert recorded == [("remotive", "error", 0)]
+
+
+def test_a_raising_source_is_also_recorded(monkeypatch, session):
+    recorded: list[tuple] = []
+    monkeypatch.setattr(runner.cache, "should_fetch", lambda *a, **k: True)
+    monkeypatch.setattr(
+        runner.cache,
+        "record_fetch",
+        lambda session, name, *, status, count: recorded.append((name, status, count)),
+    )
+
+    class _Boom:
+        name = "remotive"
+        ttl_seconds = 3600
+
+        def fetch(self, client, session):  # noqa: ANN001
+            raise httpx.ConnectError("getaddrinfo failed")
+
+    stats = _run(monkeypatch, session, _Boom())
+
+    assert "ConnectError" in stats.error
+    assert recorded == [("remotive", "error", 0)]
 
 
 def test_http_errors_survive_into_the_summary(monkeypatch, session, no_throttle):

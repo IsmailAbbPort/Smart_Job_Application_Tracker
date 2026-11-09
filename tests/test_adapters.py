@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import httpx
+import pytest
+
 from app.ingest.sources import arbeitnow, ashby, greenhouse, lever, remotive
+from app.models import TargetCompany
 from tests.conftest import load_fixture
 
 
@@ -83,3 +87,122 @@ def test_remotive_parse_always_remote():
     assert job.company == "Coalition Technologies"  # trimmed
     assert job.description == "Write high-quality content & SEO copy."
     assert job.posted_at is not None and job.posted_at.month == 7
+
+
+# --- fetch: what each adapter reports about bad statuses -----------------------
+#
+# The parse tests above never call fetch, so the status reporting the notifier
+# depends on had no coverage at all in the real adapters: the runner's tests used a
+# double that behaved the way the adapters were supposed to. These drive the actual
+# fetch methods over a mock transport.
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+def _targets(session, ats: str, *slugs: str) -> None:
+    for slug in slugs:
+        session.add(TargetCompany(company=slug.title(), ats=ats, slug=slug, active=True))
+    session.commit()
+
+
+@pytest.mark.parametrize(
+    ("module", "source_class", "ats"),
+    [
+        (greenhouse, greenhouse.GreenhouseSource, "greenhouse"),
+        (lever, lever.LeverSource, "lever"),
+        (ashby, ashby.AshbySource, "ashby"),
+    ],
+)
+def test_a_board_level_adapter_separates_answered_boards_from_failed_ones(
+    module, source_class, ats, session, monkeypatch
+):
+    monkeypatch.setattr(module, "_POLITE_DELAY", 0)
+    _targets(session, ats, "acme", "closed")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "closed" in str(request.url):
+            return httpx.Response(404)
+        return httpx.Response(200, json=load_fixture(f"{ats}.json"))
+
+    source = source_class()
+    jobs = source.fetch(_client(handler), session)
+
+    # The board that answered is recorded even though the other one 404'd, which is
+    # what stops the runner calling the whole source down.
+    assert source.fetched_slugs == {"acme"}
+    assert source.http_errors == {"closed": 404}
+    assert jobs
+
+
+@pytest.mark.parametrize(
+    ("module", "source_class", "ats"),
+    [
+        (greenhouse, greenhouse.GreenhouseSource, "greenhouse"),
+        (lever, lever.LeverSource, "lever"),
+        (ashby, ashby.AshbySource, "ashby"),
+    ],
+)
+def test_a_board_level_adapter_reports_every_failed_board(
+    module, source_class, ats, session, monkeypatch
+):
+    monkeypatch.setattr(module, "_POLITE_DELAY", 0)
+    _targets(session, ats, "acme", "globex")
+
+    source = source_class()
+    jobs = source.fetch(_client(lambda request: httpx.Response(503)), session)
+
+    assert jobs == []
+    assert source.fetched_slugs == set()
+    assert source.http_errors == {"acme": 503, "globex": 503}
+
+
+def test_remotive_reports_its_one_endpoint_being_down(session):
+    source = remotive.RemotiveSource()
+
+    jobs = source.fetch(_client(lambda request: httpx.Response(503)), session)
+
+    assert jobs == []
+    assert source.http_errors == {"remotive": 503}
+
+
+def test_remotive_clears_a_previous_failure_on_a_good_fetch(session):
+    # The attribute lives on the source instance, which the runner reuses across
+    # runs, so a stale error would make a recovered source look permanently down.
+    source = remotive.RemotiveSource()
+    source.fetch(_client(lambda request: httpx.Response(503)), session)
+
+    jobs = source.fetch(
+        _client(lambda request: httpx.Response(200, json=load_fixture("remotive.json"))), session
+    )
+
+    assert jobs
+    assert source.http_errors == {}
+
+
+def test_arbeitnow_keeps_the_pages_it_already_had(session):
+    # A bad status on page two is not the source being unreachable: the jobs from
+    # page one are real, and the runner sees fetched > 0 and does not call it down.
+    payload = load_fixture("arbeitnow.json")
+    first = {**payload, "links": {"next": "https://arbeitnow.test/api/page2"}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "page2" in str(request.url):
+            return httpx.Response(500)
+        return httpx.Response(200, json=first)
+
+    source = arbeitnow.ArbeitnowSource()
+    jobs = source.fetch(_client(handler), session)
+
+    assert len(jobs) == 1
+    assert source.http_errors == {"arbeitnow": 500}
+
+
+def test_arbeitnow_reports_a_dead_first_page(session):
+    source = arbeitnow.ArbeitnowSource()
+
+    jobs = source.fetch(_client(lambda request: httpx.Response(503)), session)
+
+    assert jobs == []
+    assert source.http_errors == {"arbeitnow": 503}

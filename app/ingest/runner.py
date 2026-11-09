@@ -82,6 +82,16 @@ class IngestStats:
         return asdict(self)
 
 
+def _worst_status(statuses) -> int:
+    """The most serious of several HTTP statuses.
+
+    Not `max()`: the numbers happen to rank correctly for 5xx against 429, but a
+    rejected or moved endpoint (401/403, go and fix something) sorts below a 404 (a
+    board that closed, routine), so the larger number named the wrong one.
+    """
+    return max(statuses, key=lambda status: (status >= 500, status == 429, status != 404, status))
+
+
 @dataclass
 class IngestSummary:
     results: list[IngestStats] = field(default_factory=list)
@@ -255,12 +265,16 @@ def ingest_source(
         jobs = source.fetch(client, session)
         stats.fetched = len(jobs)
         stats.http_errors = dict(getattr(source, "http_errors", None) or {})
+        answered = getattr(source, "fetched_slugs", None) or None
         # A source that brought back nothing AND saw bad statuses is down, not empty.
         # Without this a 503 looked identical to a genuinely empty feed: status ok,
         # 0 inserted, no error, and so no notification at all.
-        if stats.http_errors and not jobs:
-            worst = max(stats.http_errors.values())
-            stats.error = f"HTTPStatusError: HTTP {worst}"
+        #
+        # `answered` is the escape hatch for the multi-board sources: a board that
+        # returns 200 with no openings has answered us, so eight quiet boards plus
+        # one closed one is not Greenhouse being down.
+        if stats.http_errors and not jobs and not answered:
+            stats.error = f"HTTPStatusError: HTTP {_worst_status(stats.http_errors.values())}"
         _persist(session, name, jobs, stats)
         # For full-catalogue sources, remove postings that dropped out of the feed.
         if getattr(source, "full_catalog", False):
@@ -269,7 +283,7 @@ def ingest_source(
                 name,
                 [cj.source_id for cj in jobs],
                 stats,
-                answered_slugs=getattr(source, "fetched_slugs", None) or None,
+                answered_slugs=answered,
             )
         cache.record_fetch(session, name, status="error" if stats.error else "ok", count=len(jobs))
         session.commit()
