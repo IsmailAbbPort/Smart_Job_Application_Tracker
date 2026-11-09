@@ -55,8 +55,36 @@ call :say [2/4] Starting the containers
 rem No --build: building is an install-time step, not a per-launch cost.
 rem Output is teed to the log so "scroll up for the reason" still has a reason
 rem hours later, and at all on the hidden path where there is nothing to scroll.
-docker compose up -d >>"%LOG%" 2>&1
-if errorlevel 1 goto fail_compose
+rem
+rem Run in a child process with a deadline rather than inline. A wedged engine can
+rem leave `docker compose up -d` hanging with no timeout of its own: seen in
+rem practice when a stalled container recreate held it for ten minutes, while
+rem `docker info` above still answered fine, so the probe could not catch it. Every
+rem other step here has a deadline; this one needs one too.
+rem
+rem && / || into sentinel files rather than %errorlevel%: the child expands its whole
+rem command line before docker runs, so an errorlevel read there is always the stale
+rem one.
+rem
+rem The child writes to its own file, not straight to the log. Appending to the log
+rem would hand it an inherited handle for as long as it lives, and Windows then
+rem refuses the parent's own appends: on the timeout path, with the child still
+rem alive, the message saying we timed out was the one message that could not be
+rem written. Its output is folded into the log once it is done.
+del "logs\compose.ok" "logs\compose.fail" "logs\compose.out" >nul 2>&1
+start "" /b cmd /c "docker compose up -d && > logs\compose.ok echo 0 || > logs\compose.fail echo 1" >"logs\compose.out" 2>&1
+set /a TRIES=0
+:wait_compose
+if exist "logs\compose.ok" goto composed
+if exist "logs\compose.fail" goto fail_compose
+set /a TRIES+=1
+if !TRIES! GEQ 60 goto fail_compose_stuck
+ping -n 6 127.0.0.1 >nul
+goto wait_compose
+
+:composed
+del "logs\compose.ok" >nul 2>&1
+call :fold_compose_output
 
 call :say [3/4] Waiting for the API
 set /a TRIES=0
@@ -109,7 +137,20 @@ call :fail "the Docker engine did not respond within 3 minutes. Open Docker Desk
 goto held
 
 :fail_compose
+del "logs\compose.fail" >nul 2>&1
+call :fold_compose_output
 call :fail "docker compose up -d returned an error. See logs\launcher.log for its output."
+goto held
+
+:fail_compose_stuck
+rem Kill the CLI clients first: it releases the call, and it releases the output
+rem handle so the lines below can actually be written. This stops no containers
+rem (docker.exe is only the client), and the point is that the engine is already
+rem not working.
+taskkill /f /im docker.exe >nul 2>&1
+ping -n 3 127.0.0.1 >nul
+call :fold_compose_output
+call :fail "docker compose up -d did not finish within 5 minutes; the Docker engine looks wedged. Restart Docker Desktop, and if WSL will not shut down, reboot."
 goto held
 
 :fail_api
@@ -132,6 +173,15 @@ endlocal
 exit /b 0
 
 rem ---------------------------------------------------------------------------
+
+rem Fold the compose child's captured output into the log, then drop it. Silent if
+rem there is nothing to fold, and tolerant of a failure: a still-running child can
+rem hold the file, and losing its output must not cost the message that follows.
+:fold_compose_output
+if not exist "logs\compose.out" goto :eof
+type "logs\compose.out" >>"%LOG%" 2>nul
+del "logs\compose.out" >nul 2>&1
+goto :eof
 
 rem Echo to the console and append a timestamped copy to the log.
 :say

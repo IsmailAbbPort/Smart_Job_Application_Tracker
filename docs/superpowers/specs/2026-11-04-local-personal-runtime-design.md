@@ -416,9 +416,26 @@ costs nothing:
 5. On timeout, print the specific step that failed and keep the window open so
    the message is readable.
 
+Step 2 runs in a child process against a five-minute deadline rather than
+inline. A wedged engine leaves `docker compose up -d` hanging with no timeout of
+its own, and the `docker info` probe in step 1 does not catch it: observed in
+practice when a stalled container recreate held compose for ten minutes while
+`docker info` kept answering normally. On the deadline the launcher kills the
+docker CLI clients (which stops no containers; the engine is the broken part)
+and reports that the engine looks wedged.
+
+Two details there are load-bearing. The child signals completion through
+sentinel files via `&&` / `||`, not `%errorlevel%`, because it expands its whole
+command line before docker runs, so an errorlevel read inside it is always the
+stale one. And it writes its output to its own file, folded into the log when it
+finishes, rather than appending to the log directly: an inherited append handle
+makes Windows refuse the parent's own writes for as long as the child lives, so
+on the timeout path the message saying we had timed out was the single message
+that could not be logged.
+
 Every step also appends to `logs/launcher.log` (gitignored, rotated at 1 MB to
-one `.old` generation), and `docker compose up -d` has its output teed there, so
-"scroll up for the reason" still has a reason hours later. A failure additionally
+one `.old` generation), so "scroll up for the reason" still has a reason hours
+later. A failure additionally
 pings Telegram with `curl`, reading the same `.env` the containers use. Both are
 there for one reason: step 5 is worth nothing on the hidden autostart path, where
 there is no window to keep open and nobody watching it. Without them, a stack
