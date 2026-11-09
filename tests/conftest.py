@@ -23,6 +23,14 @@ from sqlalchemy.pool import StaticPool
 # runs the app lifespan). Must be set before app.config is first imported + cached.
 os.environ.setdefault("INGEST_SCHEDULE_ENABLED", "false")
 
+# Blank the bot credentials for the whole suite. Not setdefault and not a fixture:
+# pydantic-settings reads the real .env for any field a test does not pass
+# explicitly, so `Settings(openai_api_key=None)` in a test used to come back holding
+# the live token, and every test that ran the pipeline messaged the real phone.
+# Environment wins over the .env file, so this is what neutralises it.
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
+
 import app.models  # noqa: E402, F401 - register tables on Base.metadata (after env set)
 from app.ai.cover_letter import FakeDrafter, get_drafter  # noqa: E402
 from app.ai.embedder import FakeEmbedder, get_embedder  # noqa: E402
@@ -86,6 +94,34 @@ class BrokenSource:
 
     def fetch(self, client, session):  # noqa: ANN001
         raise RuntimeError("boom")
+
+
+class TelegramSendAttempted(BaseException):
+    """A test tried to reach the real bot API.
+
+    Deliberately a BaseException and not an Exception: `send_message` and the
+    scheduler's `_notify` both swallow Exception by design, so an Exception here
+    would be caught, logged and turned back into a silent pass - which is the exact
+    failure this guard exists to make impossible.
+    """
+
+
+@pytest.fixture(autouse=True)
+def no_real_telegram(monkeypatch):
+    """Backstop for the blanked credentials above: fail loudly on any real POST.
+
+    A test that builds its own configured Settings would otherwise message the phone
+    while still passing, so the suite could not tell a working notifier from one that
+    only works because somebody's .env happened to be filled in.
+    """
+
+    def _blocked(*args, **kwargs):
+        raise TelegramSendAttempted(
+            "a test tried to POST to Telegram. Stub app.notify.telegram.send_message, "
+            "or pass settings whose bot token is unset."
+        )
+
+    monkeypatch.setattr("app.notify.telegram.httpx.post", _blocked)
 
 
 @pytest.fixture
