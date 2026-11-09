@@ -34,9 +34,23 @@ set "OUT=backups\jobtracker-%STAMP%.sql.gz"
 echo Dumping to %OUT% ...
 rem gzip inside the container: the embeddings make a plain dump several times larger,
 rem and Windows ships no gzip.
-docker compose exec -T db sh -c "pg_dump -U postgres jobtracker | gzip -c" > "%OUT%"
+rem
+rem `bash -o pipefail`, not `sh -c`: a shell pipeline reports only the LAST command's
+rem status, so a failing pg_dump piped into a succeeding gzip exited 0 and this script
+rem kept a tiny valid-gzip file as if it were a backup. `sh` is dash in this image and
+rem has no pipefail, so it has to be bash.
+docker compose exec -T db bash -o pipefail -c "pg_dump -U postgres jobtracker | gzip -c" > "%OUT%"
 if errorlevel 1 goto fail_dump
 for %%s in ("%OUT%") do if %%~zs LSS 1024 goto fail_empty
+
+rem Size is not integrity: a dump cut off by a full disk or a container stopped
+rem mid-write is megabytes long and still useless. pg_dump ends every complete dump
+rem with this trailer, so reading the file back and finding it proves the gzip stream
+rem is whole and the dump reached its end. `grep` without -q on purpose: -q can exit
+rem before `tail` finishes writing, and that SIGPIPE would fail pipefail spuriously.
+echo Verifying %OUT% ...
+docker compose exec -T db bash -o pipefail -c "gunzip -c | tail -n 5 | grep \"PostgreSQL database dump complete\" > /dev/null" < "%OUT%"
+if errorlevel 1 goto fail_corrupt
 
 rem Rotation. Oldest first out, by name (the stamp sorts chronologically).
 for /f "skip=%KEEP% delims=" %%f in ('dir /b /o-n "backups\jobtracker-*.sql.gz" 2^>nul') do del "backups\%%f"
@@ -65,6 +79,11 @@ goto held
 
 :fail_empty
 echo FAILED: the dump is suspiciously small; treating it as a failure.
+del "%OUT%" 2>nul
+goto held
+
+:fail_corrupt
+echo FAILED: the dump did not read back as a complete pg_dump (truncated or corrupt).
 del "%OUT%" 2>nul
 goto held
 

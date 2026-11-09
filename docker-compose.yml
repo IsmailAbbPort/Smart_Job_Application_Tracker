@@ -9,7 +9,10 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: jobtracker
     ports:
-      - "5432:5432"
+      # Loopback only, same reasoning as the api service below: the default
+      # "5432:5432" binds every interface, so the whole corpus was reachable with
+      # the password in this file from any coffee-shop network the laptop joins.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
