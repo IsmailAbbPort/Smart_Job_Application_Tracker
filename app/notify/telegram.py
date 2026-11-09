@@ -20,7 +20,7 @@ import httpx
 from sqlalchemy import func, select
 
 from app.config import Settings, get_settings
-from app.notify.problems import recovered_label
+from app.notify.problems import recovered_label, recovery_scope
 
 log = logging.getLogger("app.notify.telegram")
 
@@ -111,7 +111,9 @@ def format_run_message(
 
     `previous` is the run before this one, which is what makes a persistently broken
     source report once rather than every day, and what lets a cleared problem be
-    announced as recovered. No extra storage: it is just the previous row.
+    announced as recovered. A recovery also has to be real: the run's own `checked`
+    scopes say what it actually re-examined, because a code going missing can just
+    mean that source was throttled this time.
     """
     now = now or datetime.now(UTC)
     problems = _problem_dicts(run)
@@ -130,15 +132,17 @@ def format_run_message(
             # a run that ingested nothing.
             body.append(f"embedded {run.embedded}, classified {run.classified}")
 
-    if problems:
-        if previous is not None and set(codes) == set(previous_codes):
-            body.append(
-                f"Problems unchanged since {_day(previous.started_at)}: {problems[0]['line']}"
-            )
-        else:
-            body.extend(p["line"] for p in problems)
+    # A problem set identical to last run's is not news. It contributes no line of
+    # its own (so it cannot generate a daily message about something already
+    # reported) but is appended as a footnote to any message that does go out.
+    standing = bool(problems) and previous is not None and set(codes) == set(previous_codes)
+    if problems and not standing:
+        body.extend(p["line"] for p in problems)
+
     body.extend(
-        f"Recovered: {recovered_label(code)}" for code in previous_codes if code not in codes
+        f"Recovered: {recovered_label(code)}"
+        for code in previous_codes
+        if code not in codes and _was_rechecked(run, code)
     )
 
     if not body:
@@ -146,10 +150,25 @@ def format_run_message(
             return None
         quiet = (now - _aware(last_notified_at)).days if last_notified_at else heartbeat_days
         body.append(f"Still running. Nothing new in {quiet} days.")
-    elif run.inserted and run.status != "failed":
+
+    if standing:
+        lines = "; ".join(p["line"] for p in problems)
+        body.append(f"Standing since {_day(previous.started_at)}: {lines}")
+    if run.inserted and run.status != "failed":
         body.append("Open the Job Tracker shortcut to review.")
 
     return "\n".join([_header(run.started_at), *body])
+
+
+def _was_rechecked(run, code: str) -> bool:
+    """Whether this run actually re-examined what `code` was about.
+
+    A problem code vanishing is not evidence it was fixed: a throttled source is
+    never fetched, and the missing-key problem is only raised on a run that ingested
+    something. Without this, a quiet night announced recoveries for things nobody
+    had touched, which is the fastest way to make the messages not worth reading.
+    """
+    return recovery_scope(code) in set(run.checked or [])
 
 
 def _aware(moment: datetime) -> datetime:

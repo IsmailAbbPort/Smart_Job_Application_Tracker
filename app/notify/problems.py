@@ -105,13 +105,21 @@ def classify_problem(err: str | Exception, *, source: str | None = None) -> Prob
     provider = _provider(err)
     markers = _markers(err)
 
+    # Credits first, and outside the provider branch: `provider` comes from the
+    # exception's module, so a failure already flattened to a string can never enter
+    # that branch, and an exhausted balance was being reported as a plain rate limit
+    # (its HTTP status is 429) with a promise to backfill that no later run can keep.
+    # The markers are provider-specific strings, so a job board's 429 cannot match.
+    if any(marker in markers for marker in _CREDIT_MARKERS):
+        slug = provider.lower() if provider else "ai"
+        who = provider or "AI provider"
+        return Problem(
+            f"credits:{slug}",
+            f"{who} credits exhausted. Top up or the judge and letters stay off.",
+        )
+
     if provider is not None:
         slug = provider.lower()
-        if any(marker in markers for marker in _CREDIT_MARKERS):
-            return Problem(
-                f"credits:{slug}",
-                f"{provider} credits exhausted. Top up or the judge and letters stay off.",
-            )
         if status in (401, 403):
             return Problem(f"key:{slug}", f"AI key rejected ({provider}). Check the key in .env.")
         if status == 429:
@@ -202,3 +210,33 @@ def recovered_label(code: str) -> str:
     if sep and scope not in ("", "a source"):
         return scope
     return code.replace("_", " ").replace(":", " ").strip()
+
+
+# What a run has to have exercised before a vanished problem counts as fixed.
+# "run" means the pipeline simply got to the end, which is the only evidence there
+# is for a problem that was never scoped to anything smaller.
+RUN_SCOPE = "run"
+AI_SCOPE = "ai"
+INTERNET_SCOPE = "internet"
+_CODE_SCOPES = {
+    NO_INTERNET: INTERNET_SCOPE,
+    DATABASE: "database",
+    # Deliberately the provider and not "the key was missing": the key being absent
+    # is why the embedder never ran, so only a run that actually called OpenAI has
+    # the standing to say this is fixed.
+    MISSING_OPENAI_KEY: "openai",
+}
+
+
+def recovery_scope(code: str) -> str:
+    """The scope a run must have re-checked before `code` can be called recovered.
+
+    'down:remotive' -> 'remotive', 'credits:openai' -> 'openai', 'credits:ai' ->
+    'ai', 'no_internet' -> 'internet', anything unscoped -> 'run'.
+    """
+    if code in _CODE_SCOPES:
+        return _CODE_SCOPES[code]
+    _, sep, scope = code.partition(":")
+    if not sep or scope in ("", "a source"):
+        return RUN_SCOPE
+    return scope

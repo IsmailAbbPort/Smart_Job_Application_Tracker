@@ -41,6 +41,7 @@ def make_run(**fields) -> PipelineRun:
         "classified": 0,
         "sources": {},
         "problems": [],
+        "checked": [],
         "error": None,
         "notified_at": None,
     }
@@ -139,6 +140,53 @@ def test_openai_insufficient_quota_beats_the_plain_rate_limit():
     problem = classify_problem(exc)
 
     assert problem.code == "credits:openai"
+
+
+def test_openai_quota_is_credits_even_once_flattened_to_a_string():
+    # The provider is recognised from the exception's module, so a failure already
+    # flattened to a string could never enter the provider branch - and the credit
+    # check lived inside it. An exhausted OpenAI balance (the likeliest real failure
+    # here) was therefore reported as a plain rate limit, promising a backfill next
+    # run that cannot happen until somebody tops up.
+    flattened = (
+        "RateLimitError: Error code: 429 - {'error': {'message': 'You exceeded your current "
+        "quota, please check your plan and billing details.', 'type': 'insufficient_quota', "
+        "'code': 'insufficient_quota'}}"
+    )
+
+    problem = classify_problem(flattened)
+
+    assert problem.code == "credits:ai"
+    assert "Top up" in problem.line
+
+
+def test_anthropic_credits_are_credits_even_once_flattened_to_a_string():
+    flattened = (
+        "APIStatusError: Your credit balance is too low to access the Anthropic API; "
+        "{'type': 'error', 'error': {'type': 'billing_error'}}"
+    )
+
+    assert classify_problem(flattened).code == "credits:ai"
+
+
+def test_a_known_provider_still_gets_its_own_credit_code():
+    # The unscoped code is the fallback for a string, not a replacement: a live
+    # exception still names the provider, so the two never collapse in dedup.
+    import openai
+
+    exc = openai.RateLimitError(
+        "You exceeded your current quota",
+        response=httpx.Response(429, request=_REQUEST),
+        body={"error": {"code": "insufficient_quota"}},
+    )
+
+    assert classify_problem(exc).code == "credits:openai"
+
+
+def test_a_plain_source_429_is_not_mistaken_for_exhausted_credits():
+    # The credit markers have to be specific enough that an ordinary rate limit from
+    # a job board does not read as a billing problem.
+    assert classify_problem("HTTPStatusError: HTTP 429", source="lever").code == "ratelimit:lever"
 
 
 def test_provider_429_reports_incomplete_enrichment():
@@ -295,14 +343,46 @@ def test_a_degraded_but_successful_run_still_reports():
 # --- dedup, recovery, heartbeat ------------------------------------------------
 
 
-def test_an_unchanged_problem_set_collapses_instead_of_nagging():
+def test_a_standing_problem_set_says_nothing_of_its_own():
+    # It used to still append a line, so "collapses instead of nagging" collapsed
+    # five lines into one and then nagged that one every single day. A problem you
+    # have already been told about is not news until it changes or clears.
     problems = [Problem("down:remotive", "remotive is down (HTTP 503).").as_dict()]
     previous = make_run(started_at=NOW - timedelta(days=3), status="partial", problems=problems)
-    run = make_run(status="partial", problems=problems)
+    run = make_run(status="partial", problems=problems, checked=["remotive"])
+
+    assert format_run_message(run, previous=previous, now=NOW) is None
+
+
+def test_a_standing_problem_rides_along_on_a_message_that_was_going_out_anyway():
+    # Silent on its own, but never silently dropped: anything else worth a message
+    # carries a reminder, so a broken source cannot be forgotten.
+    problems = [Problem("down:remotive", "remotive is down (HTTP 503).").as_dict()]
+    previous = make_run(started_at=NOW - timedelta(days=3), status="partial", problems=problems)
+    run = make_run(status="partial", inserted=4, problems=problems, checked=["remotive"])
 
     text = format_run_message(run, previous=previous, now=NOW)
 
-    assert "Problems unchanged since 2 Nov" in text
+    assert "4 new jobs" in text
+    assert "Standing since 2 Nov" in text
+    assert "remotive is down (HTTP 503)." in text
+
+
+def test_a_standing_problem_rides_along_on_the_heartbeat():
+    problems = [Problem("down:remotive", "remotive is down (HTTP 503).").as_dict()]
+    previous = make_run(started_at=NOW - timedelta(days=3), status="partial", problems=problems)
+    run = make_run(status="partial", problems=problems, checked=["remotive"])
+
+    text = format_run_message(
+        run,
+        previous=previous,
+        heartbeat_days=7,
+        last_notified_at=NOW - timedelta(days=9),
+        now=NOW,
+    )
+
+    assert "Still running." in text
+    assert "Standing since 2 Nov" in text
 
 
 def test_a_changed_problem_set_restates_in_full():
@@ -314,18 +394,72 @@ def test_a_changed_problem_set_restates_in_full():
     text = format_run_message(run, previous=previous, now=NOW)
 
     assert "lever is down." in text
-    assert "unchanged" not in text
+    assert "Standing" not in text
+
+
+def test_a_standing_footnote_names_every_problem_not_just_the_first():
+    # The old collapse branch printed problems[0] only. Two sources broken at once
+    # is exactly when it mattered, and the second one was dropped on the floor every
+    # day for as long as the pair stayed broken.
+    problems = [
+        Problem("down:remotive", "remotive is down.").as_dict(),
+        Problem("down:lever", "lever is down.").as_dict(),
+    ]
+    previous = make_run(started_at=NOW - timedelta(days=3), status="partial", problems=problems)
+    run = make_run(status="partial", inserted=4, problems=problems)
+
+    text = format_run_message(run, previous=previous, now=NOW)
+
+    assert "remotive is down." in text
+    assert "lever is down." in text
 
 
 def test_a_cleared_problem_is_worth_one_recovery_line():
     previous = make_run(
         status="partial", problems=[Problem("down:remotive", "remotive is down.").as_dict()]
     )
-    run = make_run(status="ok")
+    run = make_run(status="ok", checked=["remotive"])
 
     text = format_run_message(run, previous=previous, now=NOW)
 
     assert text.endswith("Recovered: remotive")
+
+
+def test_a_source_that_was_not_re_fetched_has_not_recovered():
+    # A throttled source is not fetched at all, so its problem code is absent for a
+    # reason that has nothing to do with the source being fixed. Announcing that as
+    # a recovery is how the bot teaches you to stop believing it.
+    previous = make_run(
+        status="partial", problems=[Problem("down:remotive", "remotive is down.").as_dict()]
+    )
+    run = make_run(status="ok", checked=["greenhouse", "lever"])
+
+    assert format_run_message(run, previous=previous, now=NOW) is None
+
+
+def test_a_missing_openai_key_does_not_recover_on_a_quiet_night():
+    # no_openai_key is only raised when a run inserts something, so a night that
+    # ingested nothing used to clear it and report the key as fixed while it was
+    # still missing. Only a run that actually called OpenAI can say that.
+    previous = make_run(
+        inserted=5,
+        problems=[Problem("no_openai_key", "No OpenAI key: 5 new jobs...").as_dict()],
+    )
+    run = make_run(status="ok", checked=["greenhouse", "internet"])
+
+    assert format_run_message(run, previous=previous, now=NOW) is None
+
+
+def test_a_missing_openai_key_recovers_once_the_embedder_runs():
+    previous = make_run(
+        inserted=5,
+        problems=[Problem("no_openai_key", "No OpenAI key: 5 new jobs...").as_dict()],
+    )
+    run = make_run(status="ok", checked=["greenhouse", "openai"])
+
+    text = format_run_message(run, previous=previous, now=NOW)
+
+    assert text.endswith("Recovered: no openai key")
 
 
 def test_the_heartbeat_breaks_a_long_silence():

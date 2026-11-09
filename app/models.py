@@ -428,6 +428,10 @@ class PipelineRun(Base):
     sources: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     # Classified problem codes, so the next run can dedup and spot recoveries.
     problems: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Scopes this run actually exercised (sources fetched, AI providers called).
+    # A problem's absence only counts as recovered if its scope is in here: a
+    # throttled source is not fetched at all, so "gone" did not mean "fixed".
+    checked: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
