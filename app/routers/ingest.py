@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db import get_session
 from app.ingest.liveness import prune_dead_jobs
 from app.ingest.runner import SOURCES, backfill_enrichment, ingest_all, ingest_source
+from app.scheduler import pipeline_slot
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -53,12 +54,24 @@ def trigger_ingest(
     session: Session = Depends(get_session),
     force: bool = Query(default=False, description="Bypass the per-source TTL throttle"),
 ) -> dict:
-    """Ingest one source, or all of them with source='all'."""
-    if source == "all":
-        return ingest_all(session, force=force).as_dict()
-    if source not in SOURCES:
+    """Ingest one source, or all of them with source='all'.
+
+    Shares the scheduler's one-pipeline-at-a-time slot: pressing this during the
+    nightly run used to put a second ingest through the same tables concurrently.
+    409 rather than a queue, because the run already in flight is about to ingest
+    these same sources anyway.
+    """
+    if source != "all" and source not in SOURCES:
         raise HTTPException(
             status_code=404,
             detail=f"unknown source '{source}'. Known: {', '.join(SOURCES)} (or 'all').",
         )
-    return ingest_source(session, source, force=force).as_dict()
+    with pipeline_slot() as acquired:
+        if not acquired:
+            raise HTTPException(
+                status_code=409,
+                detail="an ingest pipeline is already running; try again when it finishes.",
+            )
+        if source == "all":
+            return ingest_all(session, force=force).as_dict()
+        return ingest_source(session, source, force=force).as_dict()

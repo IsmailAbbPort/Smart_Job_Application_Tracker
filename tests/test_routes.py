@@ -182,3 +182,36 @@ def test_ingest_endpoint_with_fake_source(client, monkeypatch):
     # The ingested jobs are now listable.
     listed = client.get("/jobs", params={"source": "fakeroute"}).json()
     assert listed["total"] == 2
+
+
+def test_manual_ingest_is_refused_while_the_pipeline_is_running(client, monkeypatch):
+    # The route took no lock, so clicking it during the nightly run put a second
+    # ingest through the same tables at the same time. The scheduler's own guard
+    # only ever covered the scheduled entry points.
+    from app import scheduler
+
+    jobs = [make_canonical(source_id="1")]
+    monkeypatch.setitem(runner.SOURCES, "fakeroute", FakeSource("fakeroute", jobs))
+
+    assert scheduler._RUN_LOCK.acquire(blocking=False)
+    try:
+        resp = client.post("/ingest/fakeroute", params={"force": "true"})
+        all_resp = client.post("/ingest/all")
+    finally:
+        scheduler._RUN_LOCK.release()
+
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
+    assert all_resp.status_code == 409
+    # Nothing was written while the slot was held.
+    assert client.get("/jobs", params={"source": "fakeroute"}).json()["total"] == 0
+
+
+def test_manual_ingest_releases_the_slot_for_the_next_call(client, monkeypatch):
+    # A route that took the lock but leaked it on the way out would make every later
+    # run skip and notify nothing, which looks exactly like a dead stack.
+    jobs = [make_canonical(source_id="1")]
+    monkeypatch.setitem(runner.SOURCES, "fakeroute", FakeSource("fakeroute", jobs))
+
+    assert client.post("/ingest/fakeroute", params={"force": "true"}).status_code == 200
+    assert client.post("/ingest/fakeroute", params={"force": "true"}).status_code == 200

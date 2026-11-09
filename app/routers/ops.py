@@ -45,7 +45,12 @@ def list_runs(
                 "removed_stale": r.removed_stale,
                 "embedded": r.embedded,
                 "classified": r.classified,
+                # The per-source breakdown is the whole reason a partial run is
+                # readable: without it the endpoint says "partial" and leaves you
+                # reading container logs to find out which source broke.
+                "sources": (r.sources or {}).get("sources") or [],
                 "problems": r.problems,
+                "checked": r.checked,
                 "error": r.error,
                 "notified_at": r.notified_at,
             }

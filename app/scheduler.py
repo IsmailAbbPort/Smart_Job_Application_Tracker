@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -38,14 +40,37 @@ log = logging.getLogger("app.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
-# One pipeline at a time across BOTH job ids. Non-reentrant and always released in
-# a finally: a leaked lock would make every later run skip, write no run row and
-# notify nothing, which is indistinguishable from a dead stack.
+# One pipeline at a time across BOTH job ids AND the manual route. Non-reentrant and
+# always released in a finally: a leaked lock would make every later run skip, write
+# no run row and notify nothing, which is indistinguishable from a dead stack.
+# Acquire it through `pipeline_slot()` rather than directly, so every entry point
+# gets the same release guarantee.
 _RUN_LOCK = threading.Lock()
 
 # How long after the catch-up job is registered before it fires, so the API is
 # serving before a long pipeline starts competing for the process.
 _CATCHUP_DELAY_SECONDS = 60
+
+# A missed one-shot is dropped without this. The catch-up exists to recover a day
+# the laptop slept through, so it of all jobs must survive arriving late.
+_MISFIRE_GRACE_SECONDS = 3600
+
+
+@contextmanager
+def pipeline_slot() -> Iterator[bool]:
+    """Hold the one-pipeline-at-a-time slot. Yields whether it was acquired.
+
+    A contextmanager rather than a bare lock because the lock has to be shared with
+    POST /ingest: a manual trigger during the nightly run used to put a second
+    ingest through the same tables, and the guard that was supposed to prevent that
+    only covered the scheduled entry points.
+    """
+    acquired = _RUN_LOCK.acquire(blocking=False)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            _RUN_LOCK.release()
 
 
 def should_catch_up(last_success_at: datetime | None, now: datetime, threshold_hours: int) -> bool:
@@ -132,13 +157,11 @@ def run_daily_pipeline(session_factory=SessionLocal, trigger: str = "schedule") 
     Returns the skip marker without writing a run row if another pipeline holds the
     lock, so an overlapping cron firing during a long catch-up costs nothing.
     """
-    if not _RUN_LOCK.acquire(blocking=False):
-        log.warning("daily pipeline already running; %s trigger skipped", trigger)
-        return {"skipped": "already running"}
-    try:
+    with pipeline_slot() as acquired:
+        if not acquired:
+            log.warning("daily pipeline already running; %s trigger skipped", trigger)
+            return {"skipped": "already running"}
         return _run_pipeline(session_factory, trigger)
-    finally:
-        _RUN_LOCK.release()
 
 
 def _run_pipeline(session_factory, trigger: str) -> dict:
@@ -147,11 +170,16 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
     from app.ai.embedder import OpenAIEmbedder, build_job_document
     from app.ingest import runner
     from app.models import MANUAL_SOURCE, Job
+    from app.notify.problems import AI_SCOPE, INTERNET_SCOPE, RUN_SCOPE
 
     settings = get_settings()
     summary: dict = {"embedded": 0, "classified": 0}
     ai_failures: list[Exception] = []
     embedding_skipped = not settings.openai_api_key
+    # What this run genuinely re-examined, so the notifier can tell a fixed problem
+    # from one whose source simply was not fetched this time. Added to as each step
+    # actually happens, never up front.
+    checked: set[str] = set()
     run_id = _open_run(session_factory, trigger)
     try:
         with session_factory() as session:
@@ -161,6 +189,15 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
             ingested = runner.ingest_all(session).as_dict()
             summary["ingest"] = ingested["totals"]
             summary["sources"] = ingested.get("sources", [])
+            for src in summary["sources"]:
+                name = src.get("source")
+                # Guarded because `checked` is sorted on the way out, and one None
+                # in the set would raise there rather than here.
+                if name and not src.get("skipped_throttled"):
+                    checked.add(name)
+                if src.get("fetched"):
+                    # Something answered, so the network is not the problem.
+                    checked.add(INTERNET_SCOPE)
 
             embedder = None
             if settings.openai_api_key:
@@ -175,11 +212,29 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
                     .limit(settings.ingest_embed_limit)
                 ).all()
                 if jobs:
-                    vectors = embedder.embed([build_job_document(j) for j in jobs])
-                    for job, vector in zip(jobs, vectors, strict=True):
-                        job.embedding = vector
-                    session.commit()
-                summary["embedded"] = len(jobs)
+                    # The call is about to happen either way, so OpenAI counts as
+                    # re-checked whether it answers or fails.
+                    checked.update({"openai", AI_SCOPE})
+                    try:
+                        vectors = embedder.embed([build_job_document(j) for j in jobs])
+                    except Exception as exc:  # noqa: BLE001 - enrichment fails soft
+                        # An exhausted balance or a rejected key must not cost the
+                        # ingest that already committed or the liveness sweep still
+                        # to come; the next run backfills the embeddings. Keeping the
+                        # live exception (rather than letting it flatten to a string
+                        # on the failure path) is also what lets the taxonomy name
+                        # the provider and so the actual remedy.
+                        session.rollback()
+                        ai_failures.append(exc)
+                        log.warning("daily pipeline: embedding failed", exc_info=True)
+                        # The same credentials back the fallback classifier, so there
+                        # is nothing to gain from trying it with a broken embedder.
+                        embedder = None
+                    else:
+                        for job, vector in zip(jobs, vectors, strict=True):
+                            job.embedding = vector
+                        session.commit()
+                        summary["embedded"] = len(jobs)
             else:
                 log.warning("daily pipeline: OPENAI_API_KEY missing; skipped embedding")
 
@@ -195,6 +250,7 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
                 if unclassified:
                     titles = [j.title for j in unclassified]
                     if llm is not None:
+                        checked.update({"anthropic", AI_SCOPE})
                         families = llm.classify_titles(titles)
                         # The classifier fails soft per batch; without this a rejected
                         # key or an empty balance looked like "nothing to classify".
@@ -214,29 +270,41 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
             summary["liveness"] = shortlist.sweep_saved_shortlists(session)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
+        # The same counts as the success path, not zeroes: the steps that completed
+        # before the failure really did insert those jobs, and a row claiming
+        # otherwise under-reports real work in /ops/runs and in the message.
+        totals, sources, inserted = _counts(summary)
         _close_run(
             session_factory,
             run_id,
             status="failed",
             error=error,
+            inserted=inserted,
+            updated=totals.get("updated", 0),
+            removed_stale=totals.get("removed_stale", 0),
+            embedded=summary["embedded"],
+            classified=summary["classified"],
+            sources={"sources": sources},
+            # No RUN_SCOPE here: the pipeline did not get to the end, so it is not
+            # evidence that a previous run-level failure is behind us.
+            checked=sorted(checked),
             problems=_problem_dicts(
                 status="failed",
                 error=error,
-                sources=summary.get("sources"),
-                inserted=0,
+                sources=sources,
+                inserted=inserted,
                 ai_failures=ai_failures,
                 embedding_skipped=embedding_skipped,
             ),
         )
         log.exception("daily pipeline failed")
-        _notify(session_factory, run_id)
+        _notify(session_factory, run_id, settings)
         raise
     else:
-        totals = summary.get("ingest") or {}
-        sources = summary.get("sources") or []
+        totals, sources, inserted = _counts(summary)
         failed_sources = [s for s in sources if s.get("error")]
         status = "partial" if failed_sources else "ok"
-        inserted = totals.get("inserted", 0)
+        checked.add(RUN_SCOPE)
         _close_run(
             session_factory,
             run_id,
@@ -247,6 +315,7 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
             embedded=summary["embedded"],
             classified=summary["classified"],
             sources={"sources": sources},
+            checked=sorted(checked),
             problems=_problem_dicts(
                 status=status,
                 error=None,
@@ -256,10 +325,20 @@ def _run_pipeline(session_factory, trigger: str) -> dict:
                 embedding_skipped=embedding_skipped,
             ),
         )
-        _notify(session_factory, run_id)
+        _notify(session_factory, run_id, settings)
 
     log.info("daily pipeline complete: %s", summary)
     return summary
+
+
+def _counts(summary: dict) -> tuple[dict, list, int]:
+    """Ingest totals, per-source rows and the inserted count, from a partial summary.
+
+    Shared by the success and failure paths so a failed run reports the work that
+    did happen rather than zeroes.
+    """
+    totals = summary.get("ingest") or {}
+    return totals, summary.get("sources") or [], totals.get("inserted", 0)
 
 
 def _problem_dicts(**kwargs) -> list[dict]:
@@ -268,15 +347,32 @@ def _problem_dicts(**kwargs) -> list[dict]:
     return [p.as_dict() for p in collect_problems(**kwargs)]
 
 
-def _notify(session_factory, run_id: int) -> None:
+def _notify(session_factory, run_id: int, settings=None) -> None:
     """Send the run's Telegram message. A notifier failure must cost nothing: the
-    run row is already closed and the ingested jobs are already committed."""
+    run row is already closed and the ingested jobs are already committed.
+
+    `settings` is the pipeline's own, forwarded rather than re-read: letting the
+    notifier call get_settings() itself meant it ignored the settings the run was
+    given, so a caller that had deliberately configured an inert notifier (every
+    test, for one) still reached the real bot.
+    """
     try:
         from app.notify.telegram import notify_run
 
-        notify_run(session_factory, run_id)
+        notify_run(session_factory, run_id, settings=settings)
     except Exception:  # noqa: BLE001 - notification is never worth failing a run over
         log.warning("run notification failed", exc_info=True)
+
+
+def _send_interrupted_notice() -> None:
+    """Tell the phone the last run was cut short. Never raises: this runs as a job,
+    and an unreachable bot must not show up as a scheduler error."""
+    try:
+        from app.notify.telegram import INTERRUPTED_LINE, send_message
+
+        send_message(INTERRUPTED_LINE)
+    except Exception:  # noqa: BLE001 - notification is never worth an error for
+        log.warning("interrupted-run notification failed", exc_info=True)
 
 
 def start_scheduler() -> None:
@@ -301,16 +397,26 @@ def start_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    interrupted = False
     try:
-        if recover_interrupted_run(SessionLocal):
-            from app.notify.telegram import INTERRUPTED_LINE, send_message
-
-            send_message(INTERRUPTED_LINE)
+        interrupted = recover_interrupted_run(SessionLocal)
         last_success = _last_successful_run_at(SessionLocal)
         due = should_catch_up(last_success, datetime.now(UTC), settings.ingest_catchup_after_hours)
     except Exception:  # noqa: BLE001 - a dead DB must not block startup
         log.warning("catch-up check failed (database unreachable?); skipping", exc_info=True)
         due = False
+
+    if interrupted:
+        # On the scheduler's thread, not here. send_message is a blocking 10s post,
+        # and this runs in the FastAPI lifespan: on a sleeping network that was 10s
+        # of an app not yet serving, and it shared the try/except above, so a slow
+        # bot could swallow the catch-up decision as collateral damage.
+        scheduler.add_job(
+            _send_interrupted_notice,
+            DateTrigger(run_date=datetime.now(UTC) + timedelta(seconds=1)),
+            id="interrupted_notice",
+            misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+        )
 
     if due:
         scheduler.add_job(
@@ -320,6 +426,7 @@ def start_scheduler() -> None:
             kwargs={"trigger": "catchup"},
             max_instances=1,
             coalesce=True,
+            misfire_grace_time=_MISFIRE_GRACE_SECONDS,
         )
         log.info("last run stale; catch-up ingest in %ds", _CATCHUP_DELAY_SECONDS)
 
