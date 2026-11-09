@@ -4,6 +4,10 @@
 # preferred over Docker Desktop's "start at login" toggle because it is scriptable
 # and because it starts Docker Desktop itself rather than assuming it is up.
 #
+# Needs an ELEVATED PowerShell: registering a task in Task Scheduler's root folder
+# is an admin operation, and a normal shell gets a bare "Access is denied"
+# (0x80070005) from the COM layer with nothing saying why.
+#
 # Run with:  powershell -ExecutionPolicy Bypass -File install-autostart.ps1
 #        or: powershell -ExecutionPolicy Bypass -File install-autostart.ps1 -Remove
 
@@ -12,6 +16,14 @@ param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
 
 $taskName = 'JobTrackerAutostart'
+
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not (New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw ("This needs an elevated PowerShell (registering a scheduled task in the " +
+        "root folder is an admin operation). Right-click PowerShell, Run as " +
+        "administrator, then run this again.")
+}
 
 if ($Remove) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
@@ -33,9 +45,17 @@ $trigger.Delay = 'PT1M'
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
-    -Settings $settings -Description 'Start the Job Tracker stack at logon (no UI)' -Force | Out-Null
+# Pinned to the user who is installing it, not left to default. This has to be run
+# elevated, and if that elevation came from a different account (a separate admin
+# user answering the UAC prompt) the task would otherwise be registered against
+# that account and never fire at this one's logon. Interactive-only, so it needs no
+# stored password and only runs while the user is actually signed in.
+$principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive
 
-Write-Host "Registered the '$taskName' logon task."
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal `
+    -Description 'Start the Job Tracker stack at logon (no UI)' -Force | Out-Null
+
+Write-Host "Registered the '$taskName' logon task for $($identity.Name)."
 Write-Host 'Verify with:  Get-ScheduledTask JobTrackerAutostart'
 Write-Host 'Test it now with:  Start-ScheduledTask JobTrackerAutostart'
