@@ -59,3 +59,6 @@ sjt-demo-build/
 
 # Local database dumps (scripts/local/backup-db.cmd). Large, and personal data.
 backups/
+
+# Launcher transcript (scripts/local/start-tracker.cmd). Local run history.
+logs/
